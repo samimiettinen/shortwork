@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useErrorHandler } from "@/hooks/use-error-handler";
 import { 
   Plus, RefreshCw, Trash2, Check, AlertCircle, ExternalLink, 
-  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud
+  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube
 } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 
@@ -30,6 +30,7 @@ interface SocialAccount {
 }
 
 const platformIcons: Record<string, React.ReactNode> = {
+  youtube: <Youtube className="w-5 h-5" />,
   instagram: <Instagram className="w-5 h-5" />,
   facebook: <Facebook className="w-5 h-5" />,
   linkedin: <Linkedin className="w-5 h-5" />,

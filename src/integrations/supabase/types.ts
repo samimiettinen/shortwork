@@ -682,6 +682,7 @@ export type Database = {
         | "tiktok"
         | "bluesky"
         | "threads"
+        | "youtube"
       post_status:
         | "draft"
         | "pending_approval"
@@ -841,6 +842,7 @@ export const Constants = {
         "tiktok",
         "bluesky",
         "threads",
+        "youtube",
       ],
       post_status: [
         "draft",
