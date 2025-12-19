@@ -1,5 +1,5 @@
 // Social Provider Types
-export type ProviderName = 'instagram' | 'facebook' | 'linkedin' | 'x' | 'tiktok' | 'threads' | 'bluesky';
+export type ProviderName = 'youtube' | 'instagram' | 'facebook' | 'linkedin' | 'x' | 'tiktok' | 'threads' | 'bluesky';
 
 export interface ProviderAccountData {
   provider: ProviderName;
@@ -82,6 +82,17 @@ export const PLATFORM_CONFIG: Record<ProviderName, {
   oauthRequired: boolean;
   setupInstructions: string;
 }> = {
+  youtube: {
+    displayName: 'YouTube',
+    color: '#FF0000',
+    bgClass: 'platform-youtube',
+    maxLength: 5000,
+    supportsImages: false,
+    supportsVideo: true,
+    supportsLinks: true,
+    oauthRequired: true,
+    setupInstructions: 'Requires Google Cloud project with YouTube Data API v3 enabled'
+  },
   instagram: {
     displayName: 'Instagram',
     color: '#E4405F',

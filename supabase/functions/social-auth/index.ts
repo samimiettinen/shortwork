@@ -7,6 +7,11 @@ const corsHeaders = {
 
 // Provider configurations
 const PROVIDERS = {
+  youtube: {
+    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    scopes: ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/userinfo.profile'],
+  },
   facebook: {
     authUrl: 'https://www.facebook.com/v18.0/dialog/oauth',
     tokenUrl: 'https://graph.facebook.com/v18.0/oauth/access_token',
@@ -255,6 +260,29 @@ async function getProviderAccountData(provider: string, tokenData: any) {
   const accessToken = tokenData.access_token;
 
   switch (provider) {
+    case 'youtube': {
+      // Get user profile
+      const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const userData = await userResponse.json();
+      
+      // Get YouTube channel info
+      const channelResponse = await fetch(
+        'https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true',
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const channelData = await channelResponse.json();
+      const channel = channelData.items?.[0];
+      
+      return {
+        providerAccountId: channel?.id || userData.id,
+        displayName: channel?.snippet?.title || userData.name,
+        handle: channel ? `@${channel.snippet.customUrl?.replace('@', '') || channel.id}` : undefined,
+        avatarUrl: channel?.snippet?.thumbnails?.default?.url || userData.picture,
+        accountType: 'creator' as const,
+      };
+    }
     case 'facebook':
     case 'instagram': {
       const response = await fetch(
