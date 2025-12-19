@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -20,9 +20,39 @@ const Onboarding = () => {
   const [workspaceName, setWorkspaceName] = useState("");
   const [timezone, setTimezone] = useState("Europe/Helsinki");
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
   const navigate = useNavigate();
   const { handleError, handleSuccess } = useErrorHandler({ showToast: false });
+
+  // Check if user already has workspaces
+  useEffect(() => {
+    const checkExistingWorkspaces = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          navigate("/auth");
+          return;
+        }
+
+        const { data: memberships } = await supabase
+          .from("workspace_members")
+          .select("workspace_id")
+          .eq("user_id", user.id)
+          .limit(1);
+
+        if (memberships && memberships.length > 0) {
+          navigate("/dashboard");
+        }
+      } catch (error) {
+        console.error("Error checking workspaces:", error);
+      } finally {
+        setChecking(false);
+      }
+    };
+
+    checkExistingWorkspaces();
+  }, [navigate]);
 
   const validateForm = (): boolean => {
     setFormError(null);
@@ -98,6 +128,14 @@ const Onboarding = () => {
       setLoading(false);
     }
   };
+
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/30">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/30 p-4">
