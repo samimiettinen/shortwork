@@ -24,6 +24,198 @@ interface PublishResult {
   error?: string;
 }
 
+// UUID validation regex
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// Platform character limits
+const PLATFORM_LIMITS: Record<string, number> = {
+  x: 280,
+  bluesky: 300,
+  threads: 500,
+  instagram: 2200,
+  linkedin: 3000,
+  facebook: 63206,
+  youtube: 5000,
+  tiktok: 2200,
+};
+
+// Validate and sanitize URL
+function validateUrl(url: string | undefined): { valid: boolean; sanitized?: string; error?: string } {
+  if (!url || url.trim() === '') {
+    return { valid: true, sanitized: undefined };
+  }
+
+  try {
+    const parsed = new URL(url);
+    
+    // Only allow http/https protocols
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return { valid: false, error: 'Only HTTP/HTTPS URLs are allowed' };
+    }
+    
+    // Block localhost and internal IPs
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === 'localhost' ||
+      hostname.startsWith('127.') ||
+      hostname.startsWith('192.168.') ||
+      hostname.startsWith('10.') ||
+      hostname.startsWith('172.16.') ||
+      hostname === '0.0.0.0'
+    ) {
+      return { valid: false, error: 'Internal URLs are not allowed' };
+    }
+    
+    return { valid: true, sanitized: parsed.toString() };
+  } catch {
+    return { valid: false, error: 'Invalid URL format' };
+  }
+}
+
+// Validate request body
+function validatePublishRequest(body: unknown): { 
+  valid: boolean; 
+  data?: PublishRequest; 
+  error?: string 
+} {
+  if (!body || typeof body !== 'object') {
+    return { valid: false, error: 'Invalid request body' };
+  }
+
+  const request = body as Record<string, unknown>;
+
+  // Validate workspaceId
+  if (!request.workspaceId || typeof request.workspaceId !== 'string') {
+    return { valid: false, error: 'workspaceId is required' };
+  }
+  if (!UUID_REGEX.test(request.workspaceId)) {
+    return { valid: false, error: 'Invalid workspaceId format' };
+  }
+
+  // Validate content
+  if (!request.content || typeof request.content !== 'string') {
+    return { valid: false, error: 'content is required' };
+  }
+  const content = request.content.trim();
+  if (content.length === 0) {
+    return { valid: false, error: 'content cannot be empty' };
+  }
+  if (content.length > 10000) {
+    return { valid: false, error: 'content exceeds maximum length of 10000 characters' };
+  }
+
+  // Validate targetAccountIds
+  if (!Array.isArray(request.targetAccountIds) || request.targetAccountIds.length === 0) {
+    return { valid: false, error: 'At least one target account is required' };
+  }
+  if (request.targetAccountIds.length > 20) {
+    return { valid: false, error: 'Maximum 20 target accounts allowed' };
+  }
+  for (const id of request.targetAccountIds) {
+    if (typeof id !== 'string' || !UUID_REGEX.test(id)) {
+      return { valid: false, error: 'Invalid account ID format' };
+    }
+  }
+
+  // Validate linkUrl (optional)
+  const linkValidation = validateUrl(request.linkUrl as string | undefined);
+  if (!linkValidation.valid) {
+    return { valid: false, error: `linkUrl: ${linkValidation.error}` };
+  }
+
+  // Validate mediaUrl (optional)
+  const mediaValidation = validateUrl(request.mediaUrl as string | undefined);
+  if (!mediaValidation.valid) {
+    return { valid: false, error: `mediaUrl: ${mediaValidation.error}` };
+  }
+
+  // Validate mediaType (optional)
+  if (request.mediaType !== undefined && 
+      request.mediaType !== 'image' && 
+      request.mediaType !== 'video') {
+    return { valid: false, error: 'mediaType must be "image" or "video"' };
+  }
+
+  return {
+    valid: true,
+    data: {
+      workspaceId: request.workspaceId,
+      content,
+      linkUrl: linkValidation.sanitized,
+      mediaUrl: mediaValidation.sanitized,
+      mediaType: request.mediaType as 'image' | 'video' | undefined,
+      targetAccountIds: request.targetAccountIds as string[],
+    },
+  };
+}
+
+// Validate content for specific platform
+function validateContentForPlatform(
+  platform: string,
+  content: string,
+  hasMedia: boolean
+): { valid: boolean; error?: string } {
+  const maxLength = PLATFORM_LIMITS[platform] || 2200;
+
+  if (content.length > maxLength) {
+    return {
+      valid: false,
+      error: `Content exceeds ${platform} limit of ${maxLength} characters`,
+    };
+  }
+
+  // Instagram requires media
+  if (platform === 'instagram' && !hasMedia) {
+    return {
+      valid: false,
+      error: 'Instagram requires an image or video',
+    };
+  }
+
+  return { valid: true };
+}
+
+// Validate workspace access
+async function validateWorkspaceAccess(
+  supabase: any,
+  authHeader: string,
+  workspaceId: string,
+  requiredRoles: string[] = ['owner', 'admin', 'editor']
+): Promise<{ authorized: boolean; userId?: string; error?: string }> {
+  // Extract and validate JWT
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+
+  if (userError || !user) {
+    console.error('Auth validation error:', userError);
+    return { authorized: false, error: 'Invalid authentication token' };
+  }
+
+  // Check workspace membership
+  const { data: membership, error: memberError } = await supabase
+    .from('workspace_members')
+    .select('role')
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', user.id)
+    .single();
+
+  if (memberError || !membership) {
+    console.log('Workspace access denied:', { userId: user.id, workspaceId, error: memberError });
+    return { authorized: false, error: 'Not a member of this workspace' };
+  }
+
+  // Validate role
+  const role = membership.role as string;
+  if (!requiredRoles.includes(role)) {
+    return {
+      authorized: false,
+      error: `Insufficient permissions. Requires: ${requiredRoles.join(', ')}`,
+    };
+  }
+
+  return { authorized: true, userId: user.id };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -41,7 +233,7 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get auth header to verify user
+    // Verify authorization header
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -50,15 +242,47 @@ Deno.serve(async (req) => {
       });
     }
 
-    const body: PublishRequest = await req.json();
-    const { workspaceId, content, linkUrl, mediaUrl, mediaType, targetAccountIds } = body;
-
-    if (!workspaceId || !content || !targetAccountIds?.length) {
-      return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+    // Parse and validate request body
+    let rawBody: unknown;
+    try {
+      rawBody = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: 'Invalid JSON in request body' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+
+    const validation = validatePublishRequest(rawBody);
+    if (!validation.valid || !validation.data) {
+      return new Response(JSON.stringify({ error: validation.error }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const { workspaceId, content, linkUrl, mediaUrl, mediaType, targetAccountIds } = validation.data;
+
+    // Validate workspace access and permissions
+    const authResult = await validateWorkspaceAccess(
+      supabase,
+      authHeader,
+      workspaceId,
+      ['owner', 'admin', 'editor']
+    );
+
+    if (!authResult.authorized) {
+      return new Response(JSON.stringify({ error: authResult.error }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    console.log('Publishing content:', { 
+      userId: authResult.userId, 
+      workspaceId, 
+      accountCount: targetAccountIds.length 
+    });
 
     // Get target accounts with tokens
     const { data: accounts, error: accountsError } = await supabase
@@ -79,6 +303,7 @@ Deno.serve(async (req) => {
       .eq('status', 'connected');
 
     if (accountsError || !accounts?.length) {
+      console.error('Accounts query error:', accountsError);
       return new Response(JSON.stringify({ error: 'No valid accounts found' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -89,6 +314,23 @@ Deno.serve(async (req) => {
     const results: PublishResult[] = [];
 
     for (const account of accounts) {
+      // Validate content for platform
+      const platformValidation = validateContentForPlatform(
+        account.platform,
+        content,
+        !!mediaUrl
+      );
+
+      if (!platformValidation.valid) {
+        results.push({
+          accountId: account.id,
+          platform: account.platform,
+          success: false,
+          error: platformValidation.error,
+        });
+        continue;
+      }
+
       const token = account.oauth_tokens?.[0];
       if (!token?.access_token) {
         results.push({
@@ -129,6 +371,25 @@ Deno.serve(async (req) => {
           error: errorMessage,
         });
       }
+    }
+
+    // Log audit entry for publish action
+    try {
+      await supabase.from('audit_logs').insert({
+        workspace_id: workspaceId,
+        actor_user_id: authResult.userId,
+        action: 'publish_content',
+        entity_type: 'social_post',
+        details: {
+          platforms: results.map(r => r.platform),
+          success_count: results.filter(r => r.success).length,
+          failure_count: results.filter(r => !r.success).length,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (auditError) {
+      console.error('Audit log error:', auditError);
+      // Don't fail the request for audit log errors
     }
 
     // Determine overall status
@@ -509,6 +770,7 @@ async function publishToThreads(
     return {
       success: true,
       postId: publishData.id,
+      postUrl: `https://threads.net/t/${publishData.id}`,
     };
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
