@@ -527,6 +527,68 @@ export type Database = {
           },
         ]
       }
+      social_posts: {
+        Row: {
+          content: string
+          created_at: string
+          error_message: string | null
+          id: string
+          link_url: string | null
+          media_type: string | null
+          media_url: string | null
+          publish_results: Json | null
+          published_at: string | null
+          scheduled_at: string | null
+          status: string
+          target_accounts: Json
+          updated_at: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          link_url?: string | null
+          media_type?: string | null
+          media_url?: string | null
+          publish_results?: Json | null
+          published_at?: string | null
+          scheduled_at?: string | null
+          status?: string
+          target_accounts?: Json
+          updated_at?: string
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          link_url?: string | null
+          media_type?: string | null
+          media_url?: string | null
+          publish_results?: Json | null
+          published_at?: string | null
+          scheduled_at?: string | null
+          status?: string
+          target_accounts?: Json
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_posts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_members: {
         Row: {
           created_at: string
@@ -619,6 +681,7 @@ export type Database = {
         | "x"
         | "tiktok"
         | "bluesky"
+        | "threads"
       post_status:
         | "draft"
         | "pending_approval"
@@ -777,6 +840,7 @@ export const Constants = {
         "x",
         "tiktok",
         "bluesky",
+        "threads",
       ],
       post_status: [
         "draft",
