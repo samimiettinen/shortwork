@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useToast } from "@/hooks/use-toast";
-import { Loader2, Zap } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useErrorHandler } from "@/hooks/use-error-handler";
+import { Loader2, Zap, AlertCircle, CheckCircle } from "lucide-react";
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -13,11 +14,49 @@ const Auth = () => {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { toast } = useToast();
+  const { handleError } = useErrorHandler({ showToast: false });
+
+  const validateForm = (): boolean => {
+    setFormError(null);
+    
+    if (!email.trim()) {
+      setFormError("Please enter your email address.");
+      return false;
+    }
+    
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setFormError("Please enter a valid email address.");
+      return false;
+    }
+    
+    if (!password) {
+      setFormError("Please enter your password.");
+      return false;
+    }
+    
+    if (password.length < 6) {
+      setFormError("Password must be at least 6 characters long.");
+      return false;
+    }
+    
+    if (!isLogin && !fullName.trim()) {
+      setFormError("Please enter your full name.");
+      return false;
+    }
+    
+    return true;
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
+    setSuccessMessage(null);
+    
+    if (!validateForm()) return;
+    
     setLoading(true);
 
     try {
@@ -35,14 +74,21 @@ const Auth = () => {
           }
         });
         if (error) throw error;
-        toast({ title: "Account created!", description: "Welcome to ShortsPublish!" });
-        navigate("/onboarding");
+        setSuccessMessage("Account created successfully! Redirecting...");
+        setTimeout(() => navigate("/onboarding"), 1500);
       }
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } catch (error) {
+      const parsed = handleError(error);
+      setFormError(parsed.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const switchMode = () => {
+    setIsLogin(!isLogin);
+    setFormError(null);
+    setSuccessMessage(null);
   };
 
   return (
@@ -72,20 +118,63 @@ const Auth = () => {
           <h2 className="text-2xl font-display font-bold mb-2">{isLogin ? "Welcome back" : "Create your account"}</h2>
           <p className="text-muted-foreground mb-8">{isLogin ? "Sign in to continue" : "Start scheduling for free"}</p>
 
+          {formError && (
+            <Alert variant="destructive" className="mb-6">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          )}
+
+          {successMessage && (
+            <Alert className="mb-6 border-success/50 bg-success/10">
+              <CheckCircle className="h-4 w-4 text-success" />
+              <AlertDescription className="text-success">{successMessage}</AlertDescription>
+            </Alert>
+          )}
+
           <form onSubmit={handleAuth} className="space-y-4">
             {!isLogin && (
               <div>
                 <Label htmlFor="fullName">Full Name</Label>
-                <Input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Doe" className="mt-1.5" />
+                <Input 
+                  id="fullName" 
+                  value={fullName} 
+                  onChange={(e) => setFullName(e.target.value)} 
+                  placeholder="John Doe" 
+                  className="mt-1.5"
+                  disabled={loading}
+                />
               </div>
             )}
             <div>
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required className="mt-1.5" />
+              <Input 
+                id="email" 
+                type="email" 
+                value={email} 
+                onChange={(e) => setEmail(e.target.value)} 
+                placeholder="you@example.com" 
+                required 
+                className="mt-1.5"
+                disabled={loading}
+              />
             </div>
             <div>
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} className="mt-1.5" />
+              <Input 
+                id="password" 
+                type="password" 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                placeholder="••••••••" 
+                required 
+                minLength={6} 
+                className="mt-1.5"
+                disabled={loading}
+              />
+              {!isLogin && (
+                <p className="text-xs text-muted-foreground mt-1">Must be at least 6 characters</p>
+              )}
             </div>
             <Button type="submit" className="w-full bg-gradient-primary hover:opacity-90" disabled={loading}>
               {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
@@ -95,7 +184,7 @@ const Auth = () => {
 
           <p className="text-center mt-6 text-muted-foreground">
             {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
-            <button onClick={() => setIsLogin(!isLogin)} className="text-primary font-medium hover:underline">
+            <button onClick={switchMode} className="text-primary font-medium hover:underline" disabled={loading}>
               {isLogin ? "Sign up" : "Sign in"}
             </button>
           </p>
