@@ -1,11 +1,11 @@
 import { ReactNode, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useAdmin } from "@/hooks/use-admin";
 import { 
-  LayoutDashboard, Calendar, Send, FileText, CheckSquare, 
-  History, Settings, LogOut, Zap, Menu, X, ChevronRight, Users
+  LayoutDashboard, Calendar, Send, FileText, 
+  History, Settings, LogOut, Zap, Menu, X, ChevronRight, Users, ShieldCheck
 } from "lucide-react";
 
 const navItems = [
@@ -18,15 +18,23 @@ const navItems = [
   { label: "Settings", icon: Settings, path: "/settings" },
 ];
 
+const adminNavItems = [
+  { label: "Admin", icon: ShieldCheck, path: "/admin" },
+];
+
 export const AppLayout = ({ children }: { children: ReactNode }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const { isAdmin } = useAdmin();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate("/auth");
   };
+
+  // Combine nav items with admin items if user is admin
+  const allNavItems = isAdmin ? [...navItems, ...adminNavItems] : navItems;
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -47,7 +55,7 @@ export const AppLayout = ({ children }: { children: ReactNode }) => {
         </div>
 
         <nav className="flex-1 p-3 space-y-1">
-          {navItems.map((item) => (
+          {allNavItems.map((item) => (
             <button
               key={item.path}
               onClick={() => { navigate(item.path); setSidebarOpen(false); }}
