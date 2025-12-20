@@ -11,6 +11,7 @@ import Onboarding from "./pages/Onboarding";
 import Channels from "./pages/Channels";
 import Compose from "./pages/Compose";
 import Queue from "./pages/Queue";
+import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="/channels" element={<Channels />} />
             <Route path="/compose" element={<Compose />} />
             <Route path="/queue" element={<Queue />} />
+            <Route path="/admin" element={<Admin />} />
             <Route path="/drafts" element={<Dashboard />} />
             <Route path="/history" element={<Dashboard />} />
             <Route path="/settings" element={<Dashboard />} />

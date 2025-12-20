@@ -589,6 +589,27 @@ export type Database = {
           },
         ]
       }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_admin_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_admin_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_admin_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
       workspace_members: {
         Row: {
           created_at: string
@@ -658,12 +679,14 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_app_admin: { Args: { _user_id: string }; Returns: boolean }
       is_workspace_admin_or_owner: { Args: { ws_id: string }; Returns: boolean }
       is_workspace_member: { Args: { ws_id: string }; Returns: boolean }
     }
     Enums: {
       account_status: "connected" | "needs_refresh" | "disconnected" | "error"
       account_type: "page" | "profile" | "business" | "creator" | "personal"
+      app_admin_role: "admin" | "superadmin"
       app_role: "owner" | "admin" | "editor" | "approver" | "viewer"
       approval_status: "pending" | "approved" | "rejected"
       asset_type: "video" | "image"
@@ -829,6 +852,7 @@ export const Constants = {
     Enums: {
       account_status: ["connected", "needs_refresh", "disconnected", "error"],
       account_type: ["page", "profile", "business", "creator", "personal"],
+      app_admin_role: ["admin", "superadmin"],
       app_role: ["owner", "admin", "editor", "approver", "viewer"],
       approval_status: ["pending", "approved", "rejected"],
       asset_type: ["video", "image"],
