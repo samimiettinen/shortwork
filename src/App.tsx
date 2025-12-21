@@ -14,6 +14,7 @@ import Queue from "./pages/Queue";
 import Admin from "./pages/Admin";
 import TeamMembers from "./pages/TeamMembers";
 import AcceptInvite from "./pages/AcceptInvite";
+import WorkspaceSettings from "./pages/WorkspaceSettings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -43,9 +44,9 @@ const App = () => (
             <Route path="/admin" element={<Admin />} />
             <Route path="/team" element={<TeamMembers />} />
             <Route path="/accept-invite" element={<AcceptInvite />} />
+            <Route path="/settings" element={<WorkspaceSettings />} />
             <Route path="/drafts" element={<Dashboard />} />
             <Route path="/history" element={<Dashboard />} />
-            <Route path="/settings" element={<Dashboard />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
