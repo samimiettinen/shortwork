@@ -610,6 +610,56 @@ export type Database = {
         }
         Relationships: []
       }
+      workspace_invitations: {
+        Row: {
+          accepted_at: string | null
+          created_at: string
+          email: string
+          expires_at: string
+          id: string
+          invited_by: string
+          role: Database["public"]["Enums"]["app_role"]
+          status: Database["public"]["Enums"]["invitation_status"]
+          token: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string
+          email: string
+          expires_at?: string
+          id?: string
+          invited_by: string
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: Database["public"]["Enums"]["invitation_status"]
+          token?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string
+          email?: string
+          expires_at?: string
+          id?: string
+          invited_by?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: Database["public"]["Enums"]["invitation_status"]
+          token?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_invitations_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_members: {
         Row: {
           created_at: string
@@ -671,6 +721,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_workspace_invitation: {
+        Args: { invitation_token: string }
+        Returns: Json
+      }
       get_user_workspace_ids: { Args: never; Returns: string[] }
       has_workspace_role: {
         Args: {
@@ -690,6 +744,7 @@ export type Database = {
       app_role: "owner" | "admin" | "editor" | "approver" | "viewer"
       approval_status: "pending" | "approved" | "rejected"
       asset_type: "video" | "image"
+      invitation_status: "pending" | "accepted" | "expired" | "cancelled"
       job_status:
         | "queued"
         | "processing"
@@ -856,6 +911,7 @@ export const Constants = {
       app_role: ["owner", "admin", "editor", "approver", "viewer"],
       approval_status: ["pending", "approved", "rejected"],
       asset_type: ["video", "image"],
+      invitation_status: ["pending", "accepted", "expired", "cancelled"],
       job_status: ["queued", "processing", "done", "failed", "retry_scheduled"],
       notification_status: ["queued", "sent", "failed"],
       platform_type: [
