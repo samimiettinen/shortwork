@@ -91,32 +91,16 @@ const Onboarding = () => {
         return;
       }
 
-      // Create workspace
-      const { data: workspace, error: wsError } = await supabase
-        .from("workspaces")
-        .insert({ name: workspaceName.trim(), timezone })
-        .select()
-        .single();
+      // Create workspace with owner in a single atomic operation
+      const { data: workspaceId, error: wsError } = await supabase
+        .rpc("create_workspace_with_owner", {
+          workspace_name: workspaceName.trim(),
+          workspace_timezone: timezone,
+        });
 
       if (wsError) {
         console.error("Workspace creation error:", wsError);
         throw wsError;
-      }
-
-      // Add user as owner
-      const { error: memberError } = await supabase
-        .from("workspace_members")
-        .insert({ 
-          workspace_id: workspace.id, 
-          user_id: user.id, 
-          role: "owner" 
-        });
-
-      if (memberError) {
-        console.error("Member creation error:", memberError);
-        // If member creation fails, try to clean up the workspace
-        await supabase.from("workspaces").delete().eq("id", workspace.id);
-        throw memberError;
       }
 
       handleSuccess("Workspace created successfully!");
