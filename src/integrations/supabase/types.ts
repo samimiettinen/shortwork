@@ -725,6 +725,10 @@ export type Database = {
         Args: { invitation_token: string }
         Returns: Json
       }
+      create_workspace_with_owner: {
+        Args: { workspace_name: string; workspace_timezone?: string }
+        Returns: string
+      }
       get_user_workspace_ids: { Args: never; Returns: string[] }
       has_workspace_role: {
         Args: {
