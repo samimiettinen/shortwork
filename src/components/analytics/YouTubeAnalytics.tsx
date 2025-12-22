@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
+import { exportToCSV } from "@/lib/csv-export";
 import { 
   Eye, Heart, MessageCircle, Users, Video, Play,
-  RefreshCw, TrendingUp, ExternalLink, AlertCircle, Loader2, Youtube
+  RefreshCw, TrendingUp, ExternalLink, AlertCircle, Loader2, Youtube, Download
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -121,6 +122,31 @@ export const YouTubeAnalytics = ({ workspaceId }: YouTubeAnalyticsProps) => {
     return num.toString();
   };
 
+  const handleExportCSV = () => {
+    const exportData = insights?.recentVideos.map(video => ({
+      title: video.title,
+      publishedAt: video.publishedAt,
+      views: video.views,
+      likes: video.likes,
+      comments: video.comments,
+      url: `https://youtube.com/watch?v=${video.id}`,
+    })) || [];
+
+    exportToCSV(exportData, [
+      { key: 'title', header: 'Video Title' },
+      { key: 'publishedAt', header: 'Published At' },
+      { key: 'views', header: 'Views' },
+      { key: 'likes', header: 'Likes' },
+      { key: 'comments', header: 'Comments' },
+      { key: 'url', header: 'URL' },
+    ], 'youtube_analytics');
+
+    toast({
+      title: "Export complete",
+      description: "YouTube analytics downloaded as CSV",
+    });
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -181,18 +207,28 @@ export const YouTubeAnalytics = ({ workspaceId }: YouTubeAnalyticsProps) => {
             )}
           </div>
         </div>
-        <Button 
-          variant="outline" 
-          onClick={handleRefresh}
-          disabled={refreshing}
-        >
-          {refreshing ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <RefreshCw className="w-4 h-4 mr-2" />
-          )}
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleExportCSV}
+            disabled={!insights || refreshing}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {error && (

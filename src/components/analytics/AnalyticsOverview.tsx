@@ -4,12 +4,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
+import { exportToCSV } from "@/lib/csv-export";
 import { 
   Users, Eye, Heart, MessageCircle, TrendingUp,
   Instagram, Facebook, Linkedin, Twitter, Youtube, MessageCircle as ThreadsIcon,
-  RefreshCw, Loader2, ArrowUpRight, AlertCircle
+  RefreshCw, Loader2, ArrowUpRight, AlertCircle, Download
 } from "lucide-react";
-
 interface PlatformSummary {
   platform: string;
   connected: boolean;
@@ -39,10 +40,10 @@ const platformConfig: Record<string, { icon: any; color: string; bgColor: string
 };
 
 export const AnalyticsOverview = ({ workspaceId }: AnalyticsOverviewProps) => {
+  const { toast } = useToast();
   const [platforms, setPlatforms] = useState<PlatformSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
   useEffect(() => {
     loadPlatforms();
   }, [workspaceId]);
@@ -180,6 +181,31 @@ export const AnalyticsOverview = ({ workspaceId }: AnalyticsOverviewProps) => {
     return num.toString();
   };
 
+  const handleExportCSV = () => {
+    const exportData = connectedPlatforms.map(p => ({
+      platform: p.platform,
+      displayName: p.displayName || '',
+      handle: p.handle || '',
+      followers: p.metrics?.followers || 0,
+      views: p.metrics?.views || 0,
+      engagement: p.metrics?.engagement || 0,
+    }));
+
+    exportToCSV(exportData, [
+      { key: 'platform', header: 'Platform' },
+      { key: 'displayName', header: 'Account Name' },
+      { key: 'handle', header: 'Handle' },
+      { key: 'followers', header: 'Followers' },
+      { key: 'views', header: 'Views' },
+      { key: 'engagement', header: 'Engagement' },
+    ], 'analytics_overview');
+
+    toast({
+      title: "Export complete",
+      description: "Analytics data downloaded as CSV",
+    });
+  };
+
   const connectedPlatforms = platforms.filter(p => p.connected);
   const totalFollowers = connectedPlatforms.reduce((sum, p) => sum + (p.metrics?.followers || 0), 0);
   const totalViews = connectedPlatforms.reduce((sum, p) => sum + (p.metrics?.views || 0), 0);
@@ -211,18 +237,28 @@ export const AnalyticsOverview = ({ workspaceId }: AnalyticsOverviewProps) => {
             {connectedPlatforms.length} of {platforms.length} platforms connected
           </p>
         </div>
-        <Button 
-          variant="outline" 
-          onClick={handleRefresh}
-          disabled={refreshing}
-        >
-          {refreshing ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <RefreshCw className="w-4 h-4 mr-2" />
-          )}
-          Refresh All
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleExportCSV}
+            disabled={connectedPlatforms.length === 0 || platforms.some(p => p.loading)}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Refresh All
+          </Button>
+        </div>
       </div>
 
       {/* Summary Cards */}
