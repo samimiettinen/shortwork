@@ -250,7 +250,7 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
 
     if (dbError) {
       console.error('DB error:', dbError);
-      return Response.redirect(`${state.returnUrl}?error=database_error`, 302);
+      return Response.redirect(`${appUrl}${state.returnUrl}?error=database_error`, 302);
     }
 
     // Store tokens separately (more secure)
