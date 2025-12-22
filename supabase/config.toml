@@ -2,3 +2,27 @@ project_id = "ehoawfmrfkcciqlzknvq"
 
 [functions.send-invitation]
 verify_jwt = true
+
+[functions.social-auth]
+verify_jwt = false
+
+[functions.social-publish]
+verify_jwt = true
+
+[functions.youtube-insights]
+verify_jwt = true
+
+[functions.facebook-insights]
+verify_jwt = true
+
+[functions.instagram-insights]
+verify_jwt = true
+
+[functions.linkedin-insights]
+verify_jwt = true
+
+[functions.x-insights]
+verify_jwt = true
+
+[functions.threads-insights]
+verify_jwt = true
