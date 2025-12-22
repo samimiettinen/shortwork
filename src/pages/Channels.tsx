@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useErrorHandler } from "@/hooks/use-error-handler";
 import { 
   Plus, RefreshCw, Trash2, Check, AlertCircle, ExternalLink, 
-  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube, HelpCircle, Zap, AlertTriangle, XCircle, RotateCcw
+  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube, HelpCircle, Zap, AlertTriangle, XCircle, RotateCcw, Copy
 } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 import { ChannelSetupWizard } from "@/components/channels/ChannelSetupWizard";
@@ -742,24 +742,55 @@ const Channels = () => {
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  Due to browser security restrictions, you need to manually click the link below. 
-                  After authorizing, return to this page and click "Done".
+                  Due to browser security restrictions in the preview, you need to copy the URL and paste it in a new browser tab.
                 </AlertDescription>
               </Alert>
+              
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Steps:</p>
+                <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
+                  <li>Click "Copy Authorization URL" below</li>
+                  <li>Open a new browser tab (Ctrl/Cmd + T)</li>
+                  <li>Paste the URL and press Enter</li>
+                  <li>Complete the {pendingAuthUrl?.provider} sign-in</li>
+                  <li>Return here and click "Done"</li>
+                </ol>
+              </div>
+
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  if (pendingAuthUrl?.url) {
+                    navigator.clipboard.writeText(pendingAuthUrl.url);
+                    toast({
+                      title: "URL Copied!",
+                      description: "Paste it in a new browser tab to authorize.",
+                    });
+                  }
+                }}
+              >
+                <Copy className="w-4 h-4 mr-2" />
+                Copy Authorization URL
+              </Button>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">or try direct link</span>
+                </div>
+              </div>
+
               <a
                 href={pendingAuthUrl?.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity font-medium"
-                onClick={() => {
-                  toast({
-                    title: "Authorization Started",
-                    description: `Complete the sign-in in the new tab, then return here and click "Done".`,
-                  });
-                }}
+                className="flex items-center justify-center gap-2 w-full py-3 px-4 border border-input bg-background rounded-md hover:bg-accent transition-colors text-sm"
               >
                 <ExternalLink className="w-4 h-4" />
-                Open {pendingAuthUrl?.provider} Authorization
+                Open {pendingAuthUrl?.provider} Authorization (may be blocked)
               </a>
             </div>
             <DialogFooter className="flex gap-2 sm:gap-0">
