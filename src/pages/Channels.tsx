@@ -314,54 +314,131 @@ const Channels = () => {
 
         {/* Connect Channel Dialog */}
         <Dialog open={showConnectDialog} onOpenChange={setShowConnectDialog}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Connect a Channel</DialogTitle>
               <DialogDescription>Choose a social media platform to connect</DialogDescription>
             </DialogHeader>
-            <div className="grid grid-cols-2 gap-3 py-4">
-              {platforms.map(([key, config]) => {
-                const isConnected = accounts.some(a => a.platform === key);
-                return (
-                  <Button
-                    key={key}
-                    variant="outline"
-                    className="h-auto py-4 flex flex-col items-center gap-2 relative"
-                    onClick={() => {
-                      if (key === 'bluesky') {
-                        setShowConnectDialog(false);
-                        setShowBlueskyDialog(true);
-                      } else {
-                        connectOAuthProvider(key);
-                      }
-                    }}
-                    disabled={connecting !== null}
-                  >
-                    {isConnected && (
-                      <Badge className="absolute -top-2 -right-2 bg-success">
-                        <Check className="w-3 h-3" />
-                      </Badge>
-                    )}
-                    <div 
-                      className="w-10 h-10 rounded-lg flex items-center justify-center text-white"
-                      style={{ backgroundColor: config.color }}
+            
+            <div className="space-y-4 py-4">
+              {/* Platform Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                {platforms.map(([key, config]) => {
+                  const isConnected = accounts.some(a => a.platform === key);
+                  return (
+                    <Button
+                      key={key}
+                      variant="outline"
+                      className="h-auto py-4 flex flex-col items-center gap-2 relative"
+                      onClick={() => {
+                        if (key === 'bluesky') {
+                          setShowConnectDialog(false);
+                          setShowBlueskyDialog(true);
+                        } else {
+                          connectOAuthProvider(key);
+                        }
+                      }}
+                      disabled={connecting !== null}
                     >
-                      {platformIcons[key] || key[0].toUpperCase()}
+                      {isConnected && (
+                        <Badge className="absolute -top-2 -right-2 bg-success">
+                          <Check className="w-3 h-3" />
+                        </Badge>
+                      )}
+                      <div 
+                        className="w-10 h-10 rounded-lg flex items-center justify-center text-white"
+                        style={{ backgroundColor: config.color }}
+                      >
+                        {platformIcons[key] || key[0].toUpperCase()}
+                      </div>
+                      <span className="font-medium">{config.displayName}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {config.oauthRequired ? 'OAuth' : 'App Password'}
+                      </span>
+                      {connecting === key && <Loader2 className="w-4 h-4 animate-spin absolute top-2 right-2" />}
+                    </Button>
+                  );
+                })}
+              </div>
+
+              {/* Connection Instructions */}
+              <div className="border-t pt-4 space-y-3">
+                <h4 className="font-semibold text-sm flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-primary" />
+                  Connection Requirements
+                </h4>
+                
+                <div className="grid gap-3 text-sm">
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <div className="font-medium flex items-center gap-2 mb-1">
+                      {platformIcons.youtube} YouTube
                     </div>
-                    <span className="font-medium">{config.displayName}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {config.oauthRequired ? 'OAuth' : 'App Password'}
-                    </span>
-                    {connecting === key && <Loader2 className="w-4 h-4 animate-spin absolute top-2 right-2" />}
-                  </Button>
-                );
-              })}
+                    <p className="text-muted-foreground text-xs">
+                      Requires a Google account with a YouTube channel. You'll be redirected to Google to authorize access to your channel data and video publishing.
+                    </p>
+                  </div>
+                  
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <div className="font-medium flex items-center gap-2 mb-1">
+                      {platformIcons.instagram} Instagram & {platformIcons.facebook} Facebook
+                    </div>
+                    <p className="text-muted-foreground text-xs">
+                      Requires a Facebook account connected to an Instagram Business or Creator account. Personal Instagram accounts cannot be connected via API. You must have admin access to the Facebook Page linked to your Instagram.
+                    </p>
+                  </div>
+                  
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <div className="font-medium flex items-center gap-2 mb-1">
+                      {platformIcons.threads} Threads
+                    </div>
+                    <p className="text-muted-foreground text-xs">
+                      Requires a Threads account linked to Instagram. Uses Meta's Threads API with OAuth. You'll authorize access through your Instagram/Facebook login.
+                    </p>
+                  </div>
+                  
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <div className="font-medium flex items-center gap-2 mb-1">
+                      {platformIcons.x} X (Twitter)
+                    </div>
+                    <p className="text-muted-foreground text-xs">
+                      Requires an X account. You'll be redirected to X to authorize the app to post on your behalf. Works with both personal and business accounts.
+                    </p>
+                  </div>
+                  
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <div className="font-medium flex items-center gap-2 mb-1">
+                      {platformIcons.linkedin} LinkedIn
+                    </div>
+                    <p className="text-muted-foreground text-xs">
+                      Requires a LinkedIn account. You can connect your personal profile or a Company Page you manage. Authorization is done through LinkedIn's OAuth flow.
+                    </p>
+                  </div>
+                  
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <div className="font-medium flex items-center gap-2 mb-1">
+                      {platformIcons.tiktok} TikTok
+                    </div>
+                    <p className="text-muted-foreground text-xs">
+                      Requires a TikTok account. Note: TikTok's API has limited functionality – videos may need to be finalized in the TikTok app.
+                    </p>
+                  </div>
+                  
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <div className="font-medium flex items-center gap-2 mb-1">
+                      {platformIcons.bluesky} Bluesky
+                    </div>
+                    <p className="text-muted-foreground text-xs">
+                      Uses App Passwords instead of OAuth. Create an App Password in your Bluesky account settings, then enter your handle and the generated password.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
+
             <Alert>
               <AlertCircle className="w-4 h-4" />
               <AlertDescription>
-                OAuth connections require API credentials configured in your environment. 
-                Check the documentation for setup instructions.
+                OAuth platforms will redirect you to authorize access. Make sure pop-ups are enabled in your browser.
               </AlertDescription>
             </Alert>
           </DialogContent>
