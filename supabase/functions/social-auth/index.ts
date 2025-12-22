@@ -167,10 +167,14 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
   const code = url.searchParams.get('code');
   const stateToken = url.searchParams.get('state');
   const error = url.searchParams.get('error');
+  const appUrl = Deno.env.get('APP_URL') || 'https://5c813f69-b2a5-4e45-9592-246ab9531464.lovableproject.com';
+
+  console.log('Callback received:', { provider, hasCode: !!code, hasState: !!stateToken, error });
 
   if (error) {
     const returnUrl = stateToken ? JSON.parse(atob(stateToken)).returnUrl : '/channels';
-    return Response.redirect(`${returnUrl}?error=${encodeURIComponent(error)}`, 302);
+    console.log('OAuth error from provider:', error);
+    return Response.redirect(`${appUrl}${returnUrl}?error=${encodeURIComponent(error)}`, 302);
   }
 
   if (!code || !stateToken) {
@@ -189,12 +193,17 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
   const clientSecret = Deno.env.get(`${provider.toUpperCase()}_CLIENT_SECRET`);
   const redirectUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/social-auth/callback/${provider}`;
 
+  console.log('Token exchange config:', { provider, hasClientId: !!clientId, hasClientSecret: !!clientSecret });
+
   if (!clientId || !clientSecret) {
-    return Response.redirect(`${state.returnUrl}?error=provider_not_configured`, 302);
+    console.error('Missing OAuth credentials for provider:', provider);
+    return Response.redirect(`${appUrl}${state.returnUrl}?error=provider_not_configured`, 302);
   }
 
   try {
     // Exchange code for token
+    console.log('Exchanging code for token with:', providerConfig.tokenUrl);
+    
     const tokenResponse = await fetch(providerConfig.tokenUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -208,14 +217,16 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
     });
 
     const tokenData = await tokenResponse.json();
+    console.log('Token response status:', tokenResponse.status, 'hasAccessToken:', !!tokenData.access_token);
 
     if (tokenData.error) {
       console.error('Token error:', tokenData);
-      return Response.redirect(`${state.returnUrl}?error=${encodeURIComponent(tokenData.error)}`, 302);
+      return Response.redirect(`${appUrl}${state.returnUrl}?error=${encodeURIComponent(tokenData.error_description || tokenData.error)}`, 302);
     }
 
     // Get user profile based on provider
     const accountData = await getProviderAccountData(provider, tokenData);
+    console.log('Account data retrieved:', { provider, displayName: accountData.displayName });
 
     // Save to database
     const { data: account, error: dbError } = await supabase
@@ -260,11 +271,10 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
     }
 
     // Redirect back to app
-    const appUrl = Deno.env.get('APP_URL') || 'http://localhost:5173';
     return Response.redirect(`${appUrl}${state.returnUrl}?connected=${provider}`, 302);
   } catch (err) {
     console.error('Callback error:', err);
-    return Response.redirect(`${state.returnUrl}?error=callback_failed`, 302);
+    return Response.redirect(`${appUrl}${state.returnUrl}?error=callback_failed`, 302);
   }
 }
 
