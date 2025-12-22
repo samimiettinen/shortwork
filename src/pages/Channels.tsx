@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useErrorHandler } from "@/hooks/use-error-handler";
 import { 
   Plus, RefreshCw, Trash2, Check, AlertCircle, ExternalLink, 
-  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube, HelpCircle, Zap
+  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube, HelpCircle, Zap, AlertTriangle, XCircle, RotateCcw
 } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 import { ChannelSetupWizard } from "@/components/channels/ChannelSetupWizard";
@@ -265,13 +265,20 @@ const Channels = () => {
                           <div className="flex items-center gap-2 mt-1">
                             <Badge 
                               variant="outline" 
-                              className={account.status === 'connected' 
-                                ? "text-success border-success/30 bg-success/10" 
-                                : "text-warning border-warning/30 bg-warning/10"
+                              className={
+                                account.status === 'connected' 
+                                  ? "text-success border-success/30 bg-success/10" 
+                                  : account.status === 'error' || account.status === 'disconnected'
+                                  ? "text-destructive border-destructive/30 bg-destructive/10"
+                                  : "text-warning border-warning/30 bg-warning/10"
                               }
                             >
                               {account.status === 'connected' ? (
                                 <><Check className="w-3 h-3 mr-1" />Connected</>
+                              ) : account.status === 'needs_refresh' ? (
+                                <><AlertTriangle className="w-3 h-3 mr-1" />Needs Reconnect</>
+                              ) : account.status === 'error' ? (
+                                <><XCircle className="w-3 h-3 mr-1" />Error</>
                               ) : (
                                 <><AlertCircle className="w-3 h-3 mr-1" />{account.status}</>
                               )}
@@ -280,6 +287,43 @@ const Channels = () => {
                         </div>
                       </div>
                     </div>
+
+                    {/* Quick Reconnect Alert for expired/error accounts */}
+                    {(account.status === 'needs_refresh' || account.status === 'error' || account.status === 'disconnected') && (
+                      <div className="mb-4 p-3 rounded-lg bg-warning/10 border border-warning/20">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-warning mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-xs text-warning font-medium mb-2">
+                              {account.status === 'needs_refresh' 
+                                ? "Token expired. Reconnect to continue publishing."
+                                : account.status === 'error'
+                                ? "Connection error. Try reconnecting."
+                                : "Account disconnected. Reconnect to restore access."
+                              }
+                            </p>
+                            <Button 
+                              size="sm" 
+                              className="bg-warning text-warning-foreground hover:bg-warning/90 h-7 text-xs"
+                              onClick={() => {
+                                if (account.platform === 'bluesky') {
+                                  setShowBlueskyDialog(true);
+                                } else {
+                                  connectOAuthProvider(account.platform);
+                                }
+                              }}
+                              disabled={connecting === account.platform}
+                            >
+                              {connecting === account.platform ? (
+                                <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Reconnecting...</>
+                              ) : (
+                                <><RotateCcw className="w-3 h-3 mr-1" />Reconnect Now</>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="text-xs text-muted-foreground mb-4">
                       {account.autopublish_capable ? (
