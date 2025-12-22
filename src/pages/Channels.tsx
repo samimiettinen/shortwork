@@ -215,42 +215,52 @@ const Channels = () => {
       if (response.error) throw response.error;
       
       if (response.data.authUrl) {
-        // Check if we're in an iframe (preview mode) - OAuth providers block iframe embedding
+        // OAuth providers like Google block embedding with X-Frame-Options
+        // We must open in a new tab, not use popups which also get blocked
         const isInIframe = window.self !== window.top;
         
         if (isInIframe) {
-          // Open OAuth in a popup window to avoid X-Frame-Options blocking
-          const width = 600;
-          const height = 700;
-          const left = window.screenX + (window.outerWidth - width) / 2;
-          const top = window.screenY + (window.outerHeight - height) / 2;
+          // In iframe context (Lovable preview), open in new tab with target="_blank"
+          // This bypasses X-Frame-Options restrictions that block popups
+          toast({
+            title: "Opening Authorization",
+            description: `A new tab will open for ${provider} authorization. Complete sign-in there, then return here.`,
+          });
           
-          const popup = window.open(
-            response.data.authUrl,
-            `${provider}_oauth`,
-            `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
-          );
+          // Use window.open with _blank target - more reliable than popup
+          const authWindow = window.open(response.data.authUrl, '_blank');
           
-          if (!popup) {
+          if (!authWindow) {
+            // If blocked, try top-level redirect as fallback
             toast({
-              title: "Pop-up Blocked",
-              description: "Please allow pop-ups for this site to connect your account, or open this page in a new tab.",
-              variant: "destructive",
+              title: "Opening in Current Tab",
+              description: "Pop-ups blocked. Redirecting to authorization page...",
             });
+            // Redirect top-level window to avoid iframe restrictions
+            if (window.top) {
+              window.top.location.href = response.data.authUrl;
+            } else {
+              window.location.href = response.data.authUrl;
+            }
           } else {
-            toast({
-              title: "Authorization Window Opened",
-              description: `Complete the ${provider} authorization in the popup window. This page will refresh when done.`,
-            });
-            
-            // Poll to check if popup is closed and refresh accounts
+            // Poll to check if tab is closed and refresh accounts
             const pollTimer = setInterval(() => {
-              if (popup.closed) {
-                clearInterval(pollTimer);
-                loadAccounts();
-                setConnecting(null);
+              try {
+                if (authWindow.closed) {
+                  clearInterval(pollTimer);
+                  loadAccounts();
+                  setConnecting(null);
+                }
+              } catch {
+                // Cross-origin errors when checking - tab is still open
               }
             }, 1000);
+            
+            // Also set a timeout to stop polling after 5 minutes
+            setTimeout(() => {
+              clearInterval(pollTimer);
+              setConnecting(null);
+            }, 5 * 60 * 1000);
           }
         } else {
           // Normal redirect for non-iframe context
