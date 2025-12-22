@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 import { ChannelSetupWizard } from "@/components/channels/ChannelSetupWizard";
+import { ConnectionTroubleshooting } from "@/components/channels/ConnectionTroubleshooting";
 
 interface SocialAccount {
   id: string;
@@ -360,6 +361,13 @@ const Channels = () => {
                 </Card>
               );
             })}
+          </div>
+        )}
+
+        {/* Troubleshooting Section - show when there are connected accounts */}
+        {accounts.length > 0 && (
+          <div className="mt-8">
+            <ConnectionTroubleshooting />
           </div>
         )}
 
