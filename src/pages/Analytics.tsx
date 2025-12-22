@@ -6,7 +6,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ThreadsAnalytics } from "@/components/analytics/ThreadsAnalytics";
 import { InstagramAnalytics } from "@/components/analytics/InstagramAnalytics";
 import { FacebookAnalytics } from "@/components/analytics/FacebookAnalytics";
-import { MessageCircle, BarChart3, Instagram, Facebook } from "lucide-react";
+import { LinkedInAnalytics } from "@/components/analytics/LinkedInAnalytics";
+import { MessageCircle, BarChart3, Instagram, Facebook, Linkedin } from "lucide-react";
 
 const Analytics = () => {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
@@ -88,6 +89,10 @@ const Analytics = () => {
               <Facebook className="w-4 h-4" />
               Facebook
             </TabsTrigger>
+            <TabsTrigger value="linkedin" className="flex items-center gap-2">
+              <Linkedin className="w-4 h-4" />
+              LinkedIn
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="threads">
@@ -100,6 +105,10 @@ const Analytics = () => {
 
           <TabsContent value="facebook">
             <FacebookAnalytics workspaceId={workspaceId} />
+          </TabsContent>
+
+          <TabsContent value="linkedin">
+            <LinkedInAnalytics workspaceId={workspaceId} />
           </TabsContent>
         </Tabs>
       </div>
