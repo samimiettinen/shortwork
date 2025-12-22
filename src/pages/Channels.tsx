@@ -215,7 +215,47 @@ const Channels = () => {
       if (response.error) throw response.error;
       
       if (response.data.authUrl) {
-        window.location.href = response.data.authUrl;
+        // Check if we're in an iframe (preview mode) - OAuth providers block iframe embedding
+        const isInIframe = window.self !== window.top;
+        
+        if (isInIframe) {
+          // Open OAuth in a popup window to avoid X-Frame-Options blocking
+          const width = 600;
+          const height = 700;
+          const left = window.screenX + (window.outerWidth - width) / 2;
+          const top = window.screenY + (window.outerHeight - height) / 2;
+          
+          const popup = window.open(
+            response.data.authUrl,
+            `${provider}_oauth`,
+            `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+          );
+          
+          if (!popup) {
+            toast({
+              title: "Pop-up Blocked",
+              description: "Please allow pop-ups for this site to connect your account, or open this page in a new tab.",
+              variant: "destructive",
+            });
+          } else {
+            toast({
+              title: "Authorization Window Opened",
+              description: `Complete the ${provider} authorization in the popup window. This page will refresh when done.`,
+            });
+            
+            // Poll to check if popup is closed and refresh accounts
+            const pollTimer = setInterval(() => {
+              if (popup.closed) {
+                clearInterval(pollTimer);
+                loadAccounts();
+                setConnecting(null);
+              }
+            }, 1000);
+          }
+        } else {
+          // Normal redirect for non-iframe context
+          window.location.href = response.data.authUrl;
+        }
       } else if (response.data.error) {
         toast({
           title: "Configuration Required",
@@ -226,7 +266,9 @@ const Channels = () => {
     } catch (error) {
       handleError(error);
     } finally {
-      setConnecting(null);
+      if (window.self === window.top) {
+        setConnecting(null);
+      }
       setShowConnectDialog(false);
     }
   };
