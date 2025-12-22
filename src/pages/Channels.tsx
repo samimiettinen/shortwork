@@ -71,6 +71,7 @@ const Channels = () => {
     expired: number;
     refreshed: number;
   } | null>(null);
+  const [pendingAuthUrl, setPendingAuthUrl] = useState<{ url: string; provider: string } | null>(null);
 
   useEffect(() => {
     loadAccounts();
@@ -216,52 +217,12 @@ const Channels = () => {
       
       if (response.data.authUrl) {
         // OAuth providers like Google block embedding with X-Frame-Options
-        // We must open in a new tab, not use popups which also get blocked
         const isInIframe = window.self !== window.top;
         
         if (isInIframe) {
-          // In iframe context (Lovable preview), open in new tab with target="_blank"
-          // This bypasses X-Frame-Options restrictions that block popups
-          toast({
-            title: "Opening Authorization",
-            description: `A new tab will open for ${provider} authorization. Complete sign-in there, then return here.`,
-          });
-          
-          // Use window.open with _blank target - more reliable than popup
-          const authWindow = window.open(response.data.authUrl, '_blank');
-          
-          if (!authWindow) {
-            // If blocked, try top-level redirect as fallback
-            toast({
-              title: "Opening in Current Tab",
-              description: "Pop-ups blocked. Redirecting to authorization page...",
-            });
-            // Redirect top-level window to avoid iframe restrictions
-            if (window.top) {
-              window.top.location.href = response.data.authUrl;
-            } else {
-              window.location.href = response.data.authUrl;
-            }
-          } else {
-            // Poll to check if tab is closed and refresh accounts
-            const pollTimer = setInterval(() => {
-              try {
-                if (authWindow.closed) {
-                  clearInterval(pollTimer);
-                  loadAccounts();
-                  setConnecting(null);
-                }
-              } catch {
-                // Cross-origin errors when checking - tab is still open
-              }
-            }, 1000);
-            
-            // Also set a timeout to stop polling after 5 minutes
-            setTimeout(() => {
-              clearInterval(pollTimer);
-              setConnecting(null);
-            }, 5 * 60 * 1000);
-          }
+          // In iframe context, show dialog with clickable link
+          // User-initiated clicks on anchor tags bypass iframe restrictions
+          setPendingAuthUrl({ url: response.data.authUrl, provider });
         } else {
           // Normal redirect for non-iframe context
           window.location.href = response.data.authUrl;
@@ -753,6 +714,71 @@ const Channels = () => {
                 ) : (
                   'Connect'
                 )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* OAuth Authorization Link Dialog */}
+        <Dialog open={!!pendingAuthUrl} onOpenChange={(open) => {
+          if (!open) {
+            setPendingAuthUrl(null);
+            setConnecting(null);
+            loadAccounts();
+          }
+        }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <ExternalLink className="w-5 h-5" />
+                Open Authorization Page
+              </DialogTitle>
+              <DialogDescription>
+                Click the button below to open the {pendingAuthUrl?.provider} authorization page in a new tab. 
+                After completing authorization, close that tab and return here.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  Due to browser security restrictions, you need to manually click the link below. 
+                  After authorizing, return to this page and click "Done".
+                </AlertDescription>
+              </Alert>
+              <a
+                href={pendingAuthUrl?.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity font-medium"
+                onClick={() => {
+                  toast({
+                    title: "Authorization Started",
+                    description: `Complete the sign-in in the new tab, then return here and click "Done".`,
+                  });
+                }}
+              >
+                <ExternalLink className="w-4 h-4" />
+                Open {pendingAuthUrl?.provider} Authorization
+              </a>
+            </div>
+            <DialogFooter className="flex gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => {
+                setPendingAuthUrl(null);
+                setConnecting(null);
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={() => {
+                setPendingAuthUrl(null);
+                setConnecting(null);
+                loadAccounts();
+                toast({
+                  title: "Checking Connection",
+                  description: "Looking for your connected account...",
+                });
+              }}>
+                Done - I've Authorized
               </Button>
             </DialogFooter>
           </DialogContent>
