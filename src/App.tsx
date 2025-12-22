@@ -15,6 +15,7 @@ import Admin from "./pages/Admin";
 import TeamMembers from "./pages/TeamMembers";
 import AcceptInvite from "./pages/AcceptInvite";
 import WorkspaceSettings from "./pages/WorkspaceSettings";
+import Analytics from "./pages/Analytics";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -45,6 +46,7 @@ const App = () => (
             <Route path="/team" element={<TeamMembers />} />
             <Route path="/accept-invite" element={<AcceptInvite />} />
             <Route path="/settings" element={<WorkspaceSettings />} />
+            <Route path="/analytics" element={<Analytics />} />
             <Route path="/drafts" element={<Dashboard />} />
             <Route path="/history" element={<Dashboard />} />
             <Route path="*" element={<NotFound />} />
