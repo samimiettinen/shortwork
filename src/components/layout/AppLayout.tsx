@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { useAdmin } from "@/hooks/use-admin";
 import { 
   LayoutDashboard, Calendar, Send, FileText, 
-  History, Settings, LogOut, Zap, Menu, X, ChevronRight, Users, UserPlus, ShieldCheck
+  History, Settings, LogOut, Zap, Menu, X, ChevronRight, Users, UserPlus, ShieldCheck, BarChart3
 } from "lucide-react";
 
 const navItems = [
@@ -14,6 +14,7 @@ const navItems = [
   { label: "Queue", icon: Calendar, path: "/queue" },
   { label: "Drafts", icon: FileText, path: "/drafts" },
   { label: "Channels", icon: Users, path: "/channels" },
+  { label: "Analytics", icon: BarChart3, path: "/analytics" },
   { label: "Team", icon: UserPlus, path: "/team" },
   { label: "History", icon: History, path: "/history" },
   { label: "Settings", icon: Settings, path: "/settings" },
