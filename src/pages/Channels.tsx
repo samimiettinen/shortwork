@@ -17,6 +17,7 @@ import {
   Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube, HelpCircle
 } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
+import { ChannelSetupWizard } from "@/components/channels/ChannelSetupWizard";
 
 interface SocialAccount {
   id: string;
@@ -235,18 +236,11 @@ const Channels = () => {
         </div>
 
         {accounts.length === 0 ? (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-4">
-                <Plus className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <h3 className="text-lg font-semibold mb-2">No channels connected</h3>
-              <p className="text-muted-foreground mb-4">Connect your social media accounts to start publishing</p>
-              <Button onClick={() => setShowConnectDialog(true)} className="bg-gradient-primary hover:opacity-90">
-                <Plus className="w-4 h-4 mr-2" /> Connect Your First Channel
-              </Button>
-            </CardContent>
-          </Card>
+          <ChannelSetupWizard
+            onConnect={connectOAuthProvider}
+            onBlueskyConnect={() => setShowBlueskyDialog(true)}
+            connecting={connecting}
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {accounts.map((account) => {
