@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
+import { exportToCSV } from "@/lib/csv-export";
 import { 
   Eye, Heart, MessageCircle, Users, Share2,
-  RefreshCw, TrendingUp, ExternalLink, AlertCircle, Loader2, Facebook
+  RefreshCw, TrendingUp, ExternalLink, AlertCircle, Loader2, Facebook, Download
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -121,6 +122,31 @@ export const FacebookAnalytics = ({ workspaceId }: FacebookAnalyticsProps) => {
     return num.toString();
   };
 
+  const handleExportCSV = () => {
+    const exportData = insights?.recentPosts.map(post => ({
+      message: post.message || '',
+      createdTime: post.createdTime,
+      likes: post.likes,
+      comments: post.comments,
+      shares: post.shares,
+      permalink: post.permalink,
+    })) || [];
+
+    exportToCSV(exportData, [
+      { key: 'message', header: 'Message' },
+      { key: 'createdTime', header: 'Posted At' },
+      { key: 'likes', header: 'Likes' },
+      { key: 'comments', header: 'Comments' },
+      { key: 'shares', header: 'Shares' },
+      { key: 'permalink', header: 'URL' },
+    ], 'facebook_analytics');
+
+    toast({
+      title: "Export complete",
+      description: "Facebook analytics downloaded as CSV",
+    });
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -180,18 +206,28 @@ export const FacebookAnalytics = ({ workspaceId }: FacebookAnalyticsProps) => {
             <p className="text-sm text-muted-foreground">Facebook Page</p>
           </div>
         </div>
-        <Button 
-          variant="outline" 
-          onClick={handleRefresh}
-          disabled={refreshing}
-        >
-          {refreshing ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <RefreshCw className="w-4 h-4 mr-2" />
-          )}
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleExportCSV}
+            disabled={!insights || refreshing}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {error && (

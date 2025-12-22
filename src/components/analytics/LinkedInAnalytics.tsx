@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
+import { exportToCSV } from "@/lib/csv-export";
 import { 
   Heart, MessageCircle, FileText,
-  RefreshCw, TrendingUp, AlertCircle, Loader2, Linkedin
+  RefreshCw, TrendingUp, AlertCircle, Loader2, Linkedin, Download
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -118,6 +119,27 @@ export const LinkedInAnalytics = ({ workspaceId }: LinkedInAnalyticsProps) => {
     return num.toString();
   };
 
+  const handleExportCSV = () => {
+    const exportData = insights?.recentPosts.map(post => ({
+      text: post.text || '',
+      createdAt: post.createdAt,
+      likes: post.likes,
+      comments: post.comments,
+    })) || [];
+
+    exportToCSV(exportData, [
+      { key: 'text', header: 'Post Text' },
+      { key: 'createdAt', header: 'Posted At' },
+      { key: 'likes', header: 'Likes' },
+      { key: 'comments', header: 'Comments' },
+    ], 'linkedin_analytics');
+
+    toast({
+      title: "Export complete",
+      description: "LinkedIn analytics downloaded as CSV",
+    });
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -176,18 +198,28 @@ export const LinkedInAnalytics = ({ workspaceId }: LinkedInAnalyticsProps) => {
             <p className="text-sm text-muted-foreground">LinkedIn Profile</p>
           </div>
         </div>
-        <Button 
-          variant="outline" 
-          onClick={handleRefresh}
-          disabled={refreshing}
-        >
-          {refreshing ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <RefreshCw className="w-4 h-4 mr-2" />
-          )}
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleExportCSV}
+            disabled={!insights || refreshing}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {error && (

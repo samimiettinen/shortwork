@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
+import { exportToCSV } from "@/lib/csv-export";
 import { 
   Eye, Heart, MessageCircle, Repeat2, Quote, Users, 
-  RefreshCw, TrendingUp, ExternalLink, AlertCircle, Loader2
+  RefreshCw, TrendingUp, ExternalLink, AlertCircle, Loader2, Download
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -127,6 +128,33 @@ export const ThreadsAnalytics = ({ workspaceId }: ThreadsAnalyticsProps) => {
     return num.toString();
   };
 
+  const handleExportCSV = () => {
+    const exportData = insights?.recentPosts.map(post => ({
+      text: post.text,
+      timestamp: post.timestamp,
+      likes: post.like_count || 0,
+      replies: post.reply_count || 0,
+      reposts: post.repost_count || 0,
+      quotes: post.quote_count || 0,
+      permalink: post.permalink,
+    })) || [];
+
+    exportToCSV(exportData, [
+      { key: 'text', header: 'Post Text' },
+      { key: 'timestamp', header: 'Posted At' },
+      { key: 'likes', header: 'Likes' },
+      { key: 'replies', header: 'Replies' },
+      { key: 'reposts', header: 'Reposts' },
+      { key: 'quotes', header: 'Quotes' },
+      { key: 'permalink', header: 'URL' },
+    ], 'threads_analytics');
+
+    toast({
+      title: "Export complete",
+      description: "Threads analytics downloaded as CSV",
+    });
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -190,18 +218,28 @@ export const ThreadsAnalytics = ({ workspaceId }: ThreadsAnalyticsProps) => {
             )}
           </div>
         </div>
-        <Button 
-          variant="outline" 
-          onClick={handleRefresh}
-          disabled={refreshing}
-        >
-          {refreshing ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <RefreshCw className="w-4 h-4 mr-2" />
-          )}
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleExportCSV}
+            disabled={!insights || refreshing}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {error && (
