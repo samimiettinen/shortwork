@@ -4,7 +4,9 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ThreadsAnalytics } from "@/components/analytics/ThreadsAnalytics";
-import { MessageCircle, BarChart3 } from "lucide-react";
+import { InstagramAnalytics } from "@/components/analytics/InstagramAnalytics";
+import { FacebookAnalytics } from "@/components/analytics/FacebookAnalytics";
+import { MessageCircle, BarChart3, Instagram, Facebook } from "lucide-react";
 
 const Analytics = () => {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
@@ -78,10 +80,26 @@ const Analytics = () => {
               <MessageCircle className="w-4 h-4" />
               Threads
             </TabsTrigger>
+            <TabsTrigger value="instagram" className="flex items-center gap-2">
+              <Instagram className="w-4 h-4" />
+              Instagram
+            </TabsTrigger>
+            <TabsTrigger value="facebook" className="flex items-center gap-2">
+              <Facebook className="w-4 h-4" />
+              Facebook
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="threads">
             <ThreadsAnalytics workspaceId={workspaceId} />
+          </TabsContent>
+
+          <TabsContent value="instagram">
+            <InstagramAnalytics workspaceId={workspaceId} />
+          </TabsContent>
+
+          <TabsContent value="facebook">
+            <FacebookAnalytics workspaceId={workspaceId} />
           </TabsContent>
         </Tabs>
       </div>
