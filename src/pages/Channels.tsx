@@ -65,6 +65,12 @@ const Channels = () => {
   const [showWizard, setShowWizard] = useState(false);
   const [blueskyCredentials, setBlueskyCredentials] = useState({ identifier: '', appPassword: '' });
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [checkingTokens, setCheckingTokens] = useState(false);
+  const [tokenCheckResults, setTokenCheckResults] = useState<{
+    checked: number;
+    expired: number;
+    refreshed: number;
+  } | null>(null);
 
   useEffect(() => {
     loadAccounts();
@@ -83,6 +89,81 @@ const Channels = () => {
       window.history.replaceState({}, '', '/channels');
     }
   }, []);
+
+  // Automatic token refresh check on page load
+  useEffect(() => {
+    if (accounts.length > 0 && workspaceId && !checkingTokens) {
+      checkTokenStatus();
+    }
+  }, [accounts.length, workspaceId]);
+
+  const checkTokenStatus = async () => {
+    if (!workspaceId || accounts.length === 0) return;
+    
+    setCheckingTokens(true);
+    try {
+      // Get tokens for all accounts
+      const accountIds = accounts.map(a => a.id);
+      const { data: tokens, error } = await supabase
+        .from('oauth_tokens')
+        .select('social_account_id, expires_at, updated_at')
+        .in('social_account_id', accountIds);
+
+      if (error) throw error;
+
+      const now = new Date();
+      const expirationThreshold = 24 * 60 * 60 * 1000; // 24 hours
+      let expiredCount = 0;
+      let refreshedCount = 0;
+      const accountsNeedingRefresh: string[] = [];
+
+      tokens?.forEach(token => {
+        if (token.expires_at) {
+          const expiresAt = new Date(token.expires_at);
+          const timeUntilExpiry = expiresAt.getTime() - now.getTime();
+          
+          // Token expired or expires within 24 hours
+          if (timeUntilExpiry < expirationThreshold) {
+            expiredCount++;
+            accountsNeedingRefresh.push(token.social_account_id);
+          }
+        }
+      });
+
+      // Update account status for expired tokens
+      if (accountsNeedingRefresh.length > 0) {
+        const { error: updateError } = await supabase
+          .from('social_accounts')
+          .update({ status: 'needs_refresh' })
+          .in('id', accountsNeedingRefresh)
+          .eq('status', 'connected');
+
+        if (!updateError) {
+          // Reload accounts to reflect new status
+          await loadAccounts();
+        }
+      }
+
+      setTokenCheckResults({
+        checked: tokens?.length || 0,
+        expired: expiredCount,
+        refreshed: refreshedCount,
+      });
+
+      // Show notification if there are expired tokens
+      if (expiredCount > 0) {
+        toast({
+          title: "Token Check Complete",
+          description: `${expiredCount} channel${expiredCount > 1 ? 's need' : ' needs'} to be reconnected.`,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Token check failed:', error);
+    } finally {
+      setCheckingTokens(false);
+    }
+  };
 
   const loadAccounts = async () => {
     try {
@@ -232,9 +313,32 @@ const Channels = () => {
             <h1 className="text-3xl font-display font-bold">Channels</h1>
             <p className="text-muted-foreground mt-1">Connect and manage your social media accounts</p>
           </div>
-          <Button onClick={() => setShowConnectDialog(true)} className="bg-gradient-primary hover:opacity-90">
-            <Plus className="w-4 h-4 mr-2" /> Connect Channel
-          </Button>
+          <div className="flex items-center gap-3">
+            {checkingTokens && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Checking tokens...
+              </div>
+            )}
+            {!checkingTokens && tokenCheckResults && tokenCheckResults.expired > 0 && (
+              <Badge variant="outline" className="text-warning border-warning/30 bg-warning/10">
+                <AlertTriangle className="w-3 h-3 mr-1" />
+                {tokenCheckResults.expired} expired
+              </Badge>
+            )}
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={checkTokenStatus}
+              disabled={checkingTokens || loading}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${checkingTokens ? 'animate-spin' : ''}`} />
+              Check Tokens
+            </Button>
+            <Button onClick={() => setShowConnectDialog(true)} className="bg-gradient-primary hover:opacity-90">
+              <Plus className="w-4 h-4 mr-2" /> Connect Channel
+            </Button>
+          </div>
         </div>
 
         {accounts.length === 0 ? (
