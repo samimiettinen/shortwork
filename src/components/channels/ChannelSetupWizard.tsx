@@ -6,7 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { 
   ChevronRight, ChevronLeft, Check, ExternalLink, 
   Youtube, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud,
-  Shield, Key, UserCheck, Zap
+  Shield, Key, UserCheck, Zap, Loader2, X
 } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 
@@ -14,6 +14,7 @@ interface ChannelSetupWizardProps {
   onConnect: (provider: ProviderName) => void;
   onBlueskyConnect: () => void;
   connecting: string | null;
+  onCancelConnect?: () => void;
 }
 
 const platformIcons: Record<string, React.ReactNode> = {
@@ -110,7 +111,7 @@ const platformRequirements: Record<string, { title: string; steps: string[]; lin
   }
 };
 
-export const ChannelSetupWizard = ({ onConnect, onBlueskyConnect, connecting }: ChannelSetupWizardProps) => {
+export const ChannelSetupWizard = ({ onConnect, onBlueskyConnect, connecting, onCancelConnect }: ChannelSetupWizardProps) => {
   const [step, setStep] = useState(0);
   const [selectedPlatform, setSelectedPlatform] = useState<ProviderName | null>(null);
 
@@ -129,6 +130,12 @@ export const ChannelSetupWizard = ({ onConnect, onBlueskyConnect, connecting }: 
       onBlueskyConnect();
     } else {
       onConnect(selectedPlatform);
+    }
+  };
+
+  const handleCancelConnect = () => {
+    if (onCancelConnect) {
+      onCancelConnect();
     }
   };
 
@@ -274,18 +281,48 @@ export const ChannelSetupWizard = ({ onConnect, onBlueskyConnect, connecting }: 
               </CardContent>
             </Card>
 
-            <Button 
-              size="lg" 
-              className="w-full bg-gradient-primary hover:opacity-90"
-              onClick={handleConnect}
-              disabled={connecting === selectedPlatform}
-            >
-              {connecting === selectedPlatform ? (
-                "Connecting..."
-              ) : (
-                <>Connect {finalConfig.displayName}</>
-              )}
-            </Button>
+            {connecting === selectedPlatform ? (
+              <div className="space-y-3">
+                <Button 
+                  size="lg" 
+                  className="w-full"
+                  disabled
+                >
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Connecting to {finalConfig.displayName}...
+                </Button>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    className="flex-1"
+                    onClick={handleCancelConnect}
+                  >
+                    <X className="w-4 h-4 mr-1" />
+                    Cancel
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    className="flex-1"
+                    onClick={handleConnect}
+                  >
+                    Retry Connection
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground text-center">
+                  If a popup opened, complete authorization there. If blocked, click Retry.
+                </p>
+              </div>
+            ) : (
+              <Button 
+                size="lg" 
+                className="w-full bg-gradient-primary hover:opacity-90"
+                onClick={handleConnect}
+              >
+                Connect {finalConfig.displayName}
+              </Button>
+            )}
           </div>
         );
 
