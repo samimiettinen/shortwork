@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useErrorHandler } from "@/hooks/use-error-handler";
 import { 
   Plus, RefreshCw, Trash2, Check, AlertCircle, ExternalLink, 
-  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube, HelpCircle
+  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube, HelpCircle, Zap
 } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 import { ChannelSetupWizard } from "@/components/channels/ChannelSetupWizard";
@@ -61,6 +61,7 @@ const Channels = () => {
   const [connecting, setConnecting] = useState<string | null>(null);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showBlueskyDialog, setShowBlueskyDialog] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
   const [blueskyCredentials, setBlueskyCredentials] = useState({ identifier: '', appPassword: '' });
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
 
@@ -450,12 +451,45 @@ const Channels = () => {
               </div>
             </div>
 
-            <Alert>
-              <AlertCircle className="w-4 h-4" />
-              <AlertDescription>
-                OAuth platforms will redirect you to authorize access. Make sure pop-ups are enabled in your browser.
-              </AlertDescription>
-            </Alert>
+            <div className="flex items-center justify-between pt-2 border-t">
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => {
+                  setShowConnectDialog(false);
+                  setShowWizard(true);
+                }}
+                className="text-primary"
+              >
+                <Zap className="w-4 h-4 mr-2" />
+                Use Setup Wizard
+              </Button>
+              <Alert className="flex-1 ml-4">
+                <AlertCircle className="w-4 h-4" />
+                <AlertDescription className="text-xs">
+                  Pop-ups must be enabled for OAuth.
+                </AlertDescription>
+              </Alert>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Setup Wizard Dialog */}
+        <Dialog open={showWizard} onOpenChange={setShowWizard}>
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto p-0">
+            <div className="p-6">
+              <ChannelSetupWizard
+                onConnect={(provider) => {
+                  setShowWizard(false);
+                  connectOAuthProvider(provider);
+                }}
+                onBlueskyConnect={() => {
+                  setShowWizard(false);
+                  setShowBlueskyDialog(true);
+                }}
+                connecting={connecting}
+              />
+            </div>
           </DialogContent>
         </Dialog>
 
