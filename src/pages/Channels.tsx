@@ -388,6 +388,7 @@ const Channels = () => {
             onConnect={connectOAuthProvider}
             onBlueskyConnect={() => setShowBlueskyDialog(true)}
             connecting={connecting}
+            onCancelConnect={() => setConnecting(null)}
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -686,6 +687,7 @@ const Channels = () => {
                   setShowBlueskyDialog(true);
                 }}
                 connecting={connecting}
+                onCancelConnect={() => setConnecting(null)}
               />
             </div>
           </DialogContent>
