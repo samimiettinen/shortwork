@@ -3,11 +3,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AnalyticsOverview } from "@/components/analytics/AnalyticsOverview";
 import { ThreadsAnalytics } from "@/components/analytics/ThreadsAnalytics";
 import { InstagramAnalytics } from "@/components/analytics/InstagramAnalytics";
 import { FacebookAnalytics } from "@/components/analytics/FacebookAnalytics";
 import { LinkedInAnalytics } from "@/components/analytics/LinkedInAnalytics";
-import { MessageCircle, BarChart3, Instagram, Facebook, Linkedin } from "lucide-react";
+import { XAnalytics } from "@/components/analytics/XAnalytics";
+import { YouTubeAnalytics } from "@/components/analytics/YouTubeAnalytics";
+import { MessageCircle, BarChart3, Instagram, Facebook, Linkedin, Twitter, Youtube, LayoutGrid } from "lucide-react";
 
 const Analytics = () => {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
@@ -75,8 +78,12 @@ const Analytics = () => {
           </p>
         </div>
 
-        <Tabs defaultValue="threads" className="space-y-6">
-          <TabsList>
+        <Tabs defaultValue="overview" className="space-y-6">
+          <TabsList className="flex-wrap h-auto gap-1">
+            <TabsTrigger value="overview" className="flex items-center gap-2">
+              <LayoutGrid className="w-4 h-4" />
+              Overview
+            </TabsTrigger>
             <TabsTrigger value="threads" className="flex items-center gap-2">
               <MessageCircle className="w-4 h-4" />
               Threads
@@ -93,7 +100,19 @@ const Analytics = () => {
               <Linkedin className="w-4 h-4" />
               LinkedIn
             </TabsTrigger>
+            <TabsTrigger value="x" className="flex items-center gap-2">
+              <Twitter className="w-4 h-4" />
+              X
+            </TabsTrigger>
+            <TabsTrigger value="youtube" className="flex items-center gap-2">
+              <Youtube className="w-4 h-4" />
+              YouTube
+            </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="overview">
+            <AnalyticsOverview workspaceId={workspaceId} />
+          </TabsContent>
 
           <TabsContent value="threads">
             <ThreadsAnalytics workspaceId={workspaceId} />
@@ -109,6 +128,14 @@ const Analytics = () => {
 
           <TabsContent value="linkedin">
             <LinkedInAnalytics workspaceId={workspaceId} />
+          </TabsContent>
+
+          <TabsContent value="x">
+            <XAnalytics workspaceId={workspaceId} />
+          </TabsContent>
+
+          <TabsContent value="youtube">
+            <YouTubeAnalytics workspaceId={workspaceId} />
           </TabsContent>
         </Tabs>
       </div>
