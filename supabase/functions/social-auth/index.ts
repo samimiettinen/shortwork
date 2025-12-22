@@ -209,7 +209,7 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
     const accountData = await getProviderAccountData(provider, tokenData);
 
     // Save to database
-    const { error: dbError } = await supabase
+    const { data: account, error: dbError } = await supabase
       .from('social_accounts')
       .upsert({
         workspace_id: state.workspaceId,
@@ -234,11 +234,10 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
     }
 
     // Store tokens separately (more secure)
-    // In production, encrypt these tokens
     const { error: tokenError } = await supabase
       .from('oauth_tokens')
       .upsert({
-        social_account_id: dbError ? null : undefined, // Handle if we have the account ID
+        social_account_id: account.id,
         access_token: tokenData.access_token,
         refresh_token: tokenData.refresh_token,
         expires_at: tokenData.expires_in 
@@ -246,6 +245,10 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
           : null,
         scope: providerConfig.scopes.join(' '),
       });
+    
+    if (tokenError) {
+      console.error('Token storage error:', tokenError);
+    }
 
     // Redirect back to app
     const appUrl = Deno.env.get('APP_URL') || 'http://localhost:5173';
@@ -318,6 +321,37 @@ async function getProviderAccountData(provider: string, tokenData: any) {
         displayName: data.data.name,
         handle: `@${data.data.username}`,
         accountType: 'personal' as const,
+      };
+    }
+    case 'threads': {
+      // Get Threads user profile
+      const response = await fetch(
+        `https://graph.threads.net/v1.0/me?fields=id,username,name,threads_profile_picture_url&access_token=${accessToken}`
+      );
+      const data = await response.json();
+      console.log('Threads user data:', data);
+      return {
+        providerAccountId: data.id,
+        displayName: data.name || data.username,
+        handle: `@${data.username}`,
+        avatarUrl: data.threads_profile_picture_url,
+        accountType: 'personal' as const,
+      };
+    }
+    case 'tiktok': {
+      // TikTok user info endpoint
+      const response = await fetch(
+        'https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url,username',
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const data = await response.json();
+      console.log('TikTok user data:', data);
+      return {
+        providerAccountId: data.data?.user?.open_id || tokenData.open_id,
+        displayName: data.data?.user?.display_name || 'TikTok User',
+        handle: data.data?.user?.username ? `@${data.data.user.username}` : undefined,
+        avatarUrl: data.data?.user?.avatar_url,
+        accountType: 'creator' as const,
       };
     }
     default:
