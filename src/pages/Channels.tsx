@@ -9,11 +9,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { useErrorHandler } from "@/hooks/use-error-handler";
 import { 
   Plus, RefreshCw, Trash2, Check, AlertCircle, ExternalLink, 
-  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube
+  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube, HelpCircle
 } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 
@@ -38,6 +39,17 @@ const platformIcons: Record<string, React.ReactNode> = {
   tiktok: <Video className="w-5 h-5" />,
   threads: <MessageCircle className="w-5 h-5" />,
   bluesky: <Cloud className="w-5 h-5" />,
+};
+
+const platformTooltips: Record<string, string> = {
+  youtube: "Requires a Google account with a YouTube channel. Authorizes access to channel data and video publishing.",
+  instagram: "Requires Instagram Business/Creator account linked to a Facebook Page. Personal accounts not supported.",
+  facebook: "Requires admin access to a Facebook Page. Personal profiles cannot be connected via API.",
+  linkedin: "Connect your personal profile or a Company Page you manage via LinkedIn OAuth.",
+  x: "Works with personal and business X accounts. Authorizes posting on your behalf.",
+  tiktok: "Connect your TikTok account. Note: Videos may need to be finalized in the TikTok app.",
+  threads: "Requires Threads account linked to Instagram. Uses Meta's Threads API via OAuth.",
+  bluesky: "Uses App Passwords (not OAuth). Create one at bsky.app/settings/app-passwords.",
 };
 
 const Channels = () => {
@@ -323,42 +335,51 @@ const Channels = () => {
             <div className="space-y-4 py-4">
               {/* Platform Grid */}
               <div className="grid grid-cols-2 gap-3">
-                {platforms.map(([key, config]) => {
-                  const isConnected = accounts.some(a => a.platform === key);
-                  return (
-                    <Button
-                      key={key}
-                      variant="outline"
-                      className="h-auto py-4 flex flex-col items-center gap-2 relative"
-                      onClick={() => {
-                        if (key === 'bluesky') {
-                          setShowConnectDialog(false);
-                          setShowBlueskyDialog(true);
-                        } else {
-                          connectOAuthProvider(key);
-                        }
-                      }}
-                      disabled={connecting !== null}
-                    >
-                      {isConnected && (
-                        <Badge className="absolute -top-2 -right-2 bg-success">
-                          <Check className="w-3 h-3" />
-                        </Badge>
-                      )}
-                      <div 
-                        className="w-10 h-10 rounded-lg flex items-center justify-center text-white"
-                        style={{ backgroundColor: config.color }}
-                      >
-                        {platformIcons[key] || key[0].toUpperCase()}
-                      </div>
-                      <span className="font-medium">{config.displayName}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {config.oauthRequired ? 'OAuth' : 'App Password'}
-                      </span>
-                      {connecting === key && <Loader2 className="w-4 h-4 animate-spin absolute top-2 right-2" />}
-                    </Button>
-                  );
-                })}
+                <TooltipProvider delayDuration={200}>
+                  {platforms.map(([key, config]) => {
+                    const isConnected = accounts.some(a => a.platform === key);
+                    return (
+                      <Tooltip key={key}>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className="h-auto py-4 flex flex-col items-center gap-2 relative"
+                            onClick={() => {
+                              if (key === 'bluesky') {
+                                setShowConnectDialog(false);
+                                setShowBlueskyDialog(true);
+                              } else {
+                                connectOAuthProvider(key);
+                              }
+                            }}
+                            disabled={connecting !== null}
+                          >
+                            {isConnected && (
+                              <Badge className="absolute -top-2 -right-2 bg-success">
+                                <Check className="w-3 h-3" />
+                              </Badge>
+                            )}
+                            <HelpCircle className="w-3 h-3 absolute top-2 right-2 text-muted-foreground" />
+                            <div 
+                              className="w-10 h-10 rounded-lg flex items-center justify-center text-white"
+                              style={{ backgroundColor: config.color }}
+                            >
+                              {platformIcons[key] || key[0].toUpperCase()}
+                            </div>
+                            <span className="font-medium">{config.displayName}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {config.oauthRequired ? 'OAuth' : 'App Password'}
+                            </span>
+                            {connecting === key && <Loader2 className="w-4 h-4 animate-spin absolute top-2 left-2" />}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-[250px] text-center">
+                          <p className="text-xs">{platformTooltips[key]}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </TooltipProvider>
               </div>
 
               {/* Connection Instructions */}
