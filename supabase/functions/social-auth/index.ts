@@ -149,6 +149,13 @@ async function handleConnect(req: Request, provider: string, supabase: any) {
   });
 
   // Provider-specific parameters
+  if (provider === 'youtube') {
+    // Required to get a refresh token from Google
+    params.set('access_type', 'offline');
+    // Force consent screen to always show (ensures we get refresh token even if user already authorized)
+    params.set('prompt', 'consent');
+  }
+
   if (provider === 'x') {
     params.set('code_challenge', 'challenge');
     params.set('code_challenge_method', 'plain');
