@@ -9,6 +9,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useErrorHandler } from "@/hooks/use-error-handler";
 import { 
@@ -79,6 +85,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [results, setResults] = useState<PublishResult[] | null>(null);
+  const [videoPreviewOpen, setVideoPreviewOpen] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -479,7 +486,13 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
             <div className="mt-1.5 relative border rounded-xl p-4 bg-muted/30">
               <div className="flex items-center gap-4">
                 {/* Preview */}
-                <div className="w-20 h-20 rounded-lg bg-muted flex items-center justify-center overflow-hidden flex-shrink-0 relative">
+                <div 
+                  className={`w-20 h-20 rounded-lg bg-muted flex items-center justify-center overflow-hidden flex-shrink-0 relative ${
+                    uploadedMedia?.type === 'video' ? 'cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all' : ''
+                  }`}
+                  onClick={() => uploadedMedia?.type === 'video' && setVideoPreviewOpen(true)}
+                  title={uploadedMedia?.type === 'video' ? 'Click to preview video' : undefined}
+                >
                   {uploadedMedia?.type === 'video' ? (
                     <div className="relative w-full h-full bg-black flex items-center justify-center">
                       {uploadedMedia.thumbnailUrl ? (
@@ -497,7 +510,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
                           preload="metadata"
                         />
                       )}
-                      <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                      <div className="absolute inset-0 bg-black/30 flex items-center justify-center group-hover:bg-black/20 transition-colors">
                         <Play className="w-6 h-6 text-white drop-shadow-lg" />
                       </div>
                       {uploadedMedia.duration && (
@@ -668,6 +681,43 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
           )}
         </Button>
       </CardContent>
+
+      {/* Video Preview Modal */}
+      <Dialog open={videoPreviewOpen} onOpenChange={setVideoPreviewOpen}>
+        <DialogContent className="sm:max-w-4xl p-0 overflow-hidden bg-black">
+          <DialogHeader className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent">
+            <DialogTitle className="text-white truncate pr-8">
+              {uploadedMedia?.name || 'Video Preview'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="relative w-full aspect-video bg-black">
+            {uploadedMedia?.type === 'video' && videoPreviewOpen && (
+              <video
+                src={uploadedMedia.url}
+                controls
+                autoPlay
+                className="w-full h-full object-contain"
+                controlsList="nodownload"
+              >
+                Your browser does not support the video tag.
+              </video>
+            )}
+          </div>
+          {uploadedMedia?.duration && (
+            <div className="absolute bottom-4 left-4 flex items-center gap-3 text-white/80 text-sm">
+              <Badge variant="secondary" className="bg-white/20 text-white border-0">
+                <FileVideo className="w-3 h-3 mr-1" />
+                {formatDuration(uploadedMedia.duration)}
+              </Badge>
+              {uploadedMedia.size && (
+                <span className="text-white/60">
+                  {formatFileSize(uploadedMedia.size)}
+                </span>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
