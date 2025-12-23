@@ -5,9 +5,9 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useErrorHandler } from "@/hooks/use-error-handler";
 import { Calendar, Send, Clock, TrendingUp, Plus, Zap, AlertCircle, RefreshCw } from "lucide-react";
+import { StorageUsage } from "@/components/dashboard/StorageUsage";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -152,7 +152,7 @@ const Dashboard = () => {
           ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card>
             <CardHeader><CardTitle>Upcoming Posts</CardTitle></CardHeader>
             <CardContent>
@@ -178,6 +178,8 @@ const Dashboard = () => {
               </div>
             </CardContent>
           </Card>
+
+          <StorageUsage />
         </div>
       </div>
     </AppLayout>
