@@ -40,6 +40,8 @@ interface UploadedMedia {
   type: 'image' | 'video';
   name: string;
   size: number;
+  thumbnailUrl?: string;
+  duration?: number;
 }
 
 const platformIcons: Record<string, React.ReactNode> = {
@@ -65,6 +67,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
   const { toast } = useToast();
   const { handleError } = useErrorHandler();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [content, setContent] = useState("");
@@ -129,6 +132,22 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
     setUploadProgress(0);
 
     try {
+      // Generate thumbnail for video files
+      let thumbnailUrl: string | undefined;
+      let duration: number | undefined;
+      
+      if (isVideo) {
+        try {
+          setUploadProgress(5);
+          const thumbData = await generateVideoThumbnail(file);
+          thumbnailUrl = thumbData.thumbnailUrl;
+          duration = thumbData.duration;
+          setUploadProgress(15);
+        } catch (thumbError) {
+          console.warn('Could not generate thumbnail:', thumbError);
+        }
+      }
+
       const fileExt = file.name.split('.').pop();
       const fileName = `${workspaceId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
@@ -160,6 +179,8 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
         type: isVideo ? 'video' : 'image',
         name: file.name,
         size: file.size,
+        thumbnailUrl,
+        duration,
       });
       setMediaUrl(publicUrl);
 
@@ -196,6 +217,52 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const generateVideoThumbnail = (file: File): Promise<{ thumbnailUrl: string; duration: number }> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      
+      video.onloadedmetadata = () => {
+        // Seek to 25% of the video for a better thumbnail
+        video.currentTime = video.duration * 0.25;
+      };
+      
+      video.onseeked = () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.8);
+        const duration = video.duration;
+        
+        // Cleanup
+        URL.revokeObjectURL(video.src);
+        video.remove();
+        canvas.remove();
+        
+        resolve({ thumbnailUrl, duration });
+      };
+      
+      video.onerror = () => {
+        URL.revokeObjectURL(video.src);
+        reject(new Error('Failed to load video'));
+      };
+      
+      video.src = URL.createObjectURL(file);
+    });
   };
 
   const toggleAccount = (accountId: string) => {
@@ -412,14 +479,32 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
             <div className="mt-1.5 relative border rounded-xl p-4 bg-muted/30">
               <div className="flex items-center gap-4">
                 {/* Preview */}
-                <div className="w-20 h-20 rounded-lg bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
+                <div className="w-20 h-20 rounded-lg bg-muted flex items-center justify-center overflow-hidden flex-shrink-0 relative">
                   {uploadedMedia?.type === 'video' ? (
                     <div className="relative w-full h-full bg-black flex items-center justify-center">
-                      <Play className="w-6 h-6 text-white" />
-                      <video 
-                        src={uploadedMedia.url} 
-                        className="absolute inset-0 w-full h-full object-cover opacity-50"
-                      />
+                      {uploadedMedia.thumbnailUrl ? (
+                        <img 
+                          src={uploadedMedia.thumbnailUrl} 
+                          alt="Video thumbnail" 
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                      ) : (
+                        <video 
+                          ref={videoRef}
+                          src={uploadedMedia.url} 
+                          className="absolute inset-0 w-full h-full object-cover"
+                          muted
+                          preload="metadata"
+                        />
+                      )}
+                      <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                        <Play className="w-6 h-6 text-white drop-shadow-lg" />
+                      </div>
+                      {uploadedMedia.duration && (
+                        <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] px-1 rounded">
+                          {formatDuration(uploadedMedia.duration)}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <img 
@@ -438,7 +523,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
                   <p className="font-medium text-sm truncate">
                     {uploadedMedia?.name || 'External media URL'}
                   </p>
-                  <div className="flex items-center gap-2 mt-1">
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <Badge variant="secondary" className="text-xs">
                       {uploadedMedia?.type === 'video' ? (
                         <><FileVideo className="w-3 h-3 mr-1" /> Video</>
@@ -449,6 +534,11 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
                     {uploadedMedia?.size && (
                       <span className="text-xs text-muted-foreground">
                         {formatFileSize(uploadedMedia.size)}
+                      </span>
+                    )}
+                    {uploadedMedia?.duration && (
+                      <span className="text-xs text-muted-foreground">
+                        • {formatDuration(uploadedMedia.duration)}
                       </span>
                     )}
                   </div>
