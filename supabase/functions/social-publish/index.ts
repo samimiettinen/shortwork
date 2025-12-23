@@ -153,7 +153,8 @@ function validatePublishRequest(body: unknown): {
 function validateContentForPlatform(
   platform: string,
   content: string,
-  hasMedia: boolean
+  hasMedia: boolean,
+  mediaType?: string
 ): { valid: boolean; error?: string } {
   const maxLength = PLATFORM_LIMITS[platform] || 2200;
 
@@ -170,6 +171,22 @@ function validateContentForPlatform(
       valid: false,
       error: 'Instagram requires an image or video',
     };
+  }
+
+  // YouTube requires video
+  if (platform === 'youtube') {
+    if (!hasMedia) {
+      return {
+        valid: false,
+        error: 'YouTube requires a video file',
+      };
+    }
+    if (mediaType !== 'video') {
+      return {
+        valid: false,
+        error: 'YouTube only supports video content',
+      };
+    }
   }
 
   return { valid: true };
@@ -318,7 +335,8 @@ Deno.serve(async (req) => {
       const platformValidation = validateContentForPlatform(
         account.platform,
         content,
-        !!mediaUrl
+        !!mediaUrl,
+        mediaType
       );
 
       if (!platformValidation.valid) {
@@ -456,6 +474,9 @@ async function publishToProvider(
     
     case 'threads':
       return publishToThreads(accountId, accessToken, content, mediaUrl);
+    
+    case 'youtube':
+      return publishToYouTube(accessToken, content, mediaUrl, options.mediaType);
     
     default:
       return { success: false, error: `Unsupported platform: ${platform}` };
@@ -773,6 +794,114 @@ async function publishToThreads(
       postUrl: `https://threads.net/t/${publishData.id}`,
     };
   } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, error: errorMessage };
+  }
+}
+
+async function publishToYouTube(
+  accessToken: string,
+  description: string,
+  videoUrl?: string,
+  mediaType?: string
+): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
+  if (!videoUrl) {
+    return { success: false, error: 'YouTube requires a video file' };
+  }
+
+  if (mediaType !== 'video') {
+    return { success: false, error: 'YouTube only supports video content' };
+  }
+
+  try {
+    console.log('Starting YouTube video upload from URL:', videoUrl);
+
+    // Step 1: Fetch the video from the provided URL
+    const videoResponse = await fetch(videoUrl);
+    if (!videoResponse.ok) {
+      return { success: false, error: `Failed to fetch video: ${videoResponse.statusText}` };
+    }
+
+    const videoBlob = await videoResponse.blob();
+    const videoSize = videoBlob.size;
+    console.log('Video size:', videoSize, 'bytes');
+
+    // Extract title from description (first line or first 100 chars)
+    const lines = description.split('\n');
+    const title = lines[0].substring(0, 100) || 'Uploaded via Social Publisher';
+
+    // Step 2: Initialize resumable upload session
+    const metadata = {
+      snippet: {
+        title,
+        description,
+        categoryId: '22', // People & Blogs category
+      },
+      status: {
+        privacyStatus: 'public',
+        selfDeclaredMadeForKids: false,
+      },
+    };
+
+    const initResponse = await fetch(
+      'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Length': videoSize.toString(),
+          'X-Upload-Content-Type': videoBlob.type || 'video/mp4',
+        },
+        body: JSON.stringify(metadata),
+      }
+    );
+
+    if (!initResponse.ok) {
+      const errorData = await initResponse.json().catch(() => ({}));
+      console.error('YouTube init upload error:', errorData);
+      return { 
+        success: false, 
+        error: errorData.error?.message || `Failed to initialize upload: ${initResponse.statusText}` 
+      };
+    }
+
+    const uploadUrl = initResponse.headers.get('Location');
+    if (!uploadUrl) {
+      return { success: false, error: 'Failed to get upload URL from YouTube' };
+    }
+
+    console.log('Got resumable upload URL, uploading video...');
+
+    // Step 3: Upload the video content
+    const uploadResponse = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': videoBlob.type || 'video/mp4',
+        'Content-Length': videoSize.toString(),
+      },
+      body: videoBlob,
+    });
+
+    if (!uploadResponse.ok) {
+      const errorData = await uploadResponse.json().catch(() => ({}));
+      console.error('YouTube video upload error:', errorData);
+      return { 
+        success: false, 
+        error: errorData.error?.message || `Failed to upload video: ${uploadResponse.statusText}` 
+      };
+    }
+
+    const uploadData = await uploadResponse.json();
+    console.log('YouTube upload successful:', uploadData.id);
+
+    return {
+      success: true,
+      postId: uploadData.id,
+      postUrl: `https://youtube.com/watch?v=${uploadData.id}`,
+    };
+  } catch (error: unknown) {
+    console.error('YouTube publish error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: errorMessage };
   }
