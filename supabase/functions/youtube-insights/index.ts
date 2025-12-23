@@ -24,11 +24,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get the OAuth token for this account
+    // Get the most recent OAuth token for this account
     const { data: tokenData, error: tokenError } = await supabase
       .from('oauth_tokens')
       .select('access_token')
       .eq('social_account_id', accountId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (tokenError || !tokenData) {
