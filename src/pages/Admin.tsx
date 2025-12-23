@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Users, FileText, Send, Building2, Trash2 } from "lucide-react";
+import { Loader2, Users, FileText, Send, Building2, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import {
@@ -49,6 +50,8 @@ interface OverallStats {
   total_social_accounts: number;
 }
 
+const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
+
 const Admin = () => {
   const navigate = useNavigate();
   const { isAdmin, loading: adminLoading } = useAdmin();
@@ -62,6 +65,26 @@ const Admin = () => {
   });
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
+  
+  // Pagination state
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersPerPage, setUsersPerPage] = useState(10);
+  const [workspacesPage, setWorkspacesPage] = useState(1);
+  const [workspacesPerPage, setWorkspacesPerPage] = useState(10);
+
+  // Paginated data
+  const paginatedUsers = useMemo(() => {
+    const start = (usersPage - 1) * usersPerPage;
+    return users.slice(start, start + usersPerPage);
+  }, [users, usersPage, usersPerPage]);
+
+  const paginatedWorkspaces = useMemo(() => {
+    const start = (workspacesPage - 1) * workspacesPerPage;
+    return workspaces.slice(start, start + workspacesPerPage);
+  }, [workspaces, workspacesPage, workspacesPerPage]);
+
+  const totalUsersPages = Math.ceil(users.length / usersPerPage);
+  const totalWorkspacesPages = Math.ceil(workspaces.length / workspacesPerPage);
 
   useEffect(() => {
     if (!adminLoading && !isAdmin) {
@@ -266,8 +289,29 @@ const Admin = () => {
 
           <TabsContent value="users">
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>All Users</CardTitle>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Rows per page:</span>
+                  <Select
+                    value={usersPerPage.toString()}
+                    onValueChange={(value) => {
+                      setUsersPerPage(Number(value));
+                      setUsersPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-[70px] h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ITEMS_PER_PAGE_OPTIONS.map((option) => (
+                        <SelectItem key={option} value={option.toString()}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent>
                 <Table>
@@ -283,7 +327,7 @@ const Admin = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {users.map((user) => (
+                    {paginatedUsers.map((user) => (
                       <TableRow key={user.id}>
                         <TableCell className="font-medium">{user.email}</TableCell>
                         <TableCell>{user.full_name || "—"}</TableCell>
@@ -342,14 +386,66 @@ const Admin = () => {
                     )}
                   </TableBody>
                 </Table>
+                {/* Users Pagination */}
+                {users.length > 0 && (
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {((usersPage - 1) * usersPerPage) + 1} to {Math.min(usersPage * usersPerPage, users.length)} of {users.length} users
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setUsersPage((p) => Math.max(1, p - 1))}
+                        disabled={usersPage === 1}
+                      >
+                        <ChevronLeft className="h-4 w-4 mr-1" />
+                        Previous
+                      </Button>
+                      <span className="text-sm text-muted-foreground px-2">
+                        Page {usersPage} of {totalUsersPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setUsersPage((p) => Math.min(totalUsersPages, p + 1))}
+                        disabled={usersPage === totalUsersPages}
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
 
           <TabsContent value="workspaces">
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>All Workspaces</CardTitle>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Rows per page:</span>
+                  <Select
+                    value={workspacesPerPage.toString()}
+                    onValueChange={(value) => {
+                      setWorkspacesPerPage(Number(value));
+                      setWorkspacesPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-[70px] h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ITEMS_PER_PAGE_OPTIONS.map((option) => (
+                        <SelectItem key={option} value={option.toString()}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent>
                 <Table>
@@ -364,7 +460,7 @@ const Admin = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {workspaces.map((workspace) => (
+                    {paginatedWorkspaces.map((workspace) => (
                       <TableRow key={workspace.id}>
                         <TableCell className="font-medium">{workspace.name}</TableCell>
                         <TableCell>{workspace.timezone}</TableCell>
@@ -419,6 +515,37 @@ const Admin = () => {
                     )}
                   </TableBody>
                 </Table>
+                {/* Workspaces Pagination */}
+                {workspaces.length > 0 && (
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {((workspacesPage - 1) * workspacesPerPage) + 1} to {Math.min(workspacesPage * workspacesPerPage, workspaces.length)} of {workspaces.length} workspaces
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setWorkspacesPage((p) => Math.max(1, p - 1))}
+                        disabled={workspacesPage === 1}
+                      >
+                        <ChevronLeft className="h-4 w-4 mr-1" />
+                        Previous
+                      </Button>
+                      <span className="text-sm text-muted-foreground px-2">
+                        Page {workspacesPage} of {totalWorkspacesPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setWorkspacesPage((p) => Math.min(totalWorkspacesPages, p + 1))}
+                        disabled={workspacesPage === totalWorkspacesPages}
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
