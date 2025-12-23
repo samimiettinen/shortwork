@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,11 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { useErrorHandler } from "@/hooks/use-error-handler";
 import { 
   Send, Loader2, AlertCircle, CheckCircle, Link2, Image, 
-  Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud
+  Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Upload, X, Youtube, FileVideo, Play
 } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 
@@ -34,7 +35,15 @@ interface PublishResult {
   error?: string;
 }
 
+interface UploadedMedia {
+  url: string;
+  type: 'image' | 'video';
+  name: string;
+  size: number;
+}
+
 const platformIcons: Record<string, React.ReactNode> = {
+  youtube: <Youtube className="w-4 h-4" />,
   instagram: <Instagram className="w-4 h-4" />,
   facebook: <Facebook className="w-4 h-4" />,
   linkedin: <Linkedin className="w-4 h-4" />,
@@ -44,6 +53,10 @@ const platformIcons: Record<string, React.ReactNode> = {
   bluesky: <Cloud className="w-4 h-4" />,
 };
 
+const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const ACCEPTED_VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+
 interface SocialPublisherProps {
   workspaceId: string;
 }
@@ -51,11 +64,15 @@ interface SocialPublisherProps {
 export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
   const { toast } = useToast();
   const { handleError } = useErrorHandler();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [content, setContent] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
+  const [uploadedMedia, setUploadedMedia] = useState<UploadedMedia | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [results, setResults] = useState<PublishResult[] | null>(null);
@@ -79,6 +96,106 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
+    const isVideo = ACCEPTED_VIDEO_TYPES.includes(file.type);
+    
+    if (!isImage && !isVideo) {
+      toast({
+        title: "Invalid file type",
+        description: "Please upload an image (JPEG, PNG, GIF, WebP) or video (MP4, MOV, WebM)",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate file size
+    if (file.size > MAX_FILE_SIZE) {
+      toast({
+        title: "File too large",
+        description: "Maximum file size is 100MB",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUploading(true);
+    setUploadProgress(0);
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${workspaceId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+      // Simulate progress for better UX
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => Math.min(prev + 10, 90));
+      }, 200);
+
+      const { data, error } = await supabase.storage
+        .from('social-media')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false,
+        });
+
+      clearInterval(progressInterval);
+
+      if (error) throw error;
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('social-media')
+        .getPublicUrl(data.path);
+
+      setUploadProgress(100);
+      
+      setUploadedMedia({
+        url: publicUrl,
+        type: isVideo ? 'video' : 'image',
+        name: file.name,
+        size: file.size,
+      });
+      setMediaUrl(publicUrl);
+
+      toast({
+        title: "Upload complete",
+        description: `${isVideo ? 'Video' : 'Image'} uploaded successfully`,
+      });
+    } catch (error) {
+      handleError(error);
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const removeMedia = async () => {
+    if (uploadedMedia) {
+      // Extract file path from URL
+      const urlParts = uploadedMedia.url.split('/social-media/');
+      if (urlParts[1]) {
+        await supabase.storage
+          .from('social-media')
+          .remove([urlParts[1]]);
+      }
+    }
+    setUploadedMedia(null);
+    setMediaUrl("");
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
   const toggleAccount = (accountId: string) => {
@@ -116,13 +233,13 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
       errors.push(`Content exceeds character limit (${content.length}/${limit})`);
     }
     
-    // Check Instagram requires media
-    const hasInstagram = accounts
+    // Check Instagram/TikTok/YouTube requires media
+    const requiresMedia = accounts
       .filter(a => selectedAccounts.includes(a.id))
-      .some(a => a.platform === 'instagram');
+      .some(a => ['instagram', 'tiktok', 'youtube'].includes(a.platform));
     
-    if (hasInstagram && !mediaUrl) {
-      errors.push("Instagram requires an image or video");
+    if (requiresMedia && !mediaUrl && !uploadedMedia) {
+      errors.push("Selected platform(s) require an image or video");
     }
     
     return errors;
@@ -167,6 +284,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
         setContent("");
         setLinkUrl("");
         setMediaUrl("");
+        setUploadedMedia(null);
         setSelectedAccounts([]);
       } else if (data.status === 'partial') {
         toast({
@@ -243,32 +361,140 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
           </div>
         </div>
 
-        {/* Link & Media */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label className="flex items-center gap-2">
-              <Link2 className="w-4 h-4" /> Link URL (optional)
-            </Label>
-            <Input
-              value={linkUrl}
-              onChange={(e) => setLinkUrl(e.target.value)}
-              placeholder="https://..."
-              className="mt-1.5"
-              disabled={publishing}
-            />
-          </div>
-          <div>
-            <Label className="flex items-center gap-2">
-              <Image className="w-4 h-4" /> Media URL (optional)
-            </Label>
-            <Input
-              value={mediaUrl}
-              onChange={(e) => setMediaUrl(e.target.value)}
-              placeholder="https://... (image or video URL)"
-              className="mt-1.5"
-              disabled={publishing}
-            />
-          </div>
+        {/* Media Upload */}
+        <div>
+          <Label className="flex items-center gap-2">
+            <Upload className="w-4 h-4" /> Media (optional)
+          </Label>
+          
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={[...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_VIDEO_TYPES].join(',')}
+            onChange={handleFileSelect}
+            className="hidden"
+            disabled={uploading || publishing}
+          />
+
+          {/* Upload area or preview */}
+          {!uploadedMedia && !mediaUrl ? (
+            <div 
+              onClick={() => !uploading && !publishing && fileInputRef.current?.click()}
+              className={`mt-1.5 border-2 border-dashed rounded-xl p-6 text-center transition-colors cursor-pointer
+                ${uploading ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 hover:bg-muted/30'}`}
+            >
+              {uploading ? (
+                <div className="space-y-3">
+                  <Loader2 className="w-8 h-8 mx-auto text-primary animate-spin" />
+                  <p className="text-sm font-medium">Uploading...</p>
+                  <Progress value={uploadProgress} className="w-full max-w-xs mx-auto" />
+                </div>
+              ) : (
+                <>
+                  <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
+                  <p className="font-medium text-sm">Click to upload or drag & drop</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Images (JPEG, PNG, GIF, WebP) or Videos (MP4, MOV, WebM) up to 100MB
+                  </p>
+                  <div className="flex justify-center gap-2 mt-3">
+                    <Badge variant="outline" className="text-xs">
+                      <Image className="w-3 h-3 mr-1" /> Images
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                      <FileVideo className="w-3 h-3 mr-1" /> Videos
+                    </Badge>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="mt-1.5 relative border rounded-xl p-4 bg-muted/30">
+              <div className="flex items-center gap-4">
+                {/* Preview */}
+                <div className="w-20 h-20 rounded-lg bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
+                  {uploadedMedia?.type === 'video' ? (
+                    <div className="relative w-full h-full bg-black flex items-center justify-center">
+                      <Play className="w-6 h-6 text-white" />
+                      <video 
+                        src={uploadedMedia.url} 
+                        className="absolute inset-0 w-full h-full object-cover opacity-50"
+                      />
+                    </div>
+                  ) : (
+                    <img 
+                      src={uploadedMedia?.url || mediaUrl} 
+                      alt="Preview" 
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  )}
+                </div>
+                
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm truncate">
+                    {uploadedMedia?.name || 'External media URL'}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Badge variant="secondary" className="text-xs">
+                      {uploadedMedia?.type === 'video' ? (
+                        <><FileVideo className="w-3 h-3 mr-1" /> Video</>
+                      ) : (
+                        <><Image className="w-3 h-3 mr-1" /> Image</>
+                      )}
+                    </Badge>
+                    {uploadedMedia?.size && (
+                      <span className="text-xs text-muted-foreground">
+                        {formatFileSize(uploadedMedia.size)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Remove button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={removeMedia}
+                  disabled={publishing}
+                  className="flex-shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Alternative: URL input */}
+          {!uploadedMedia && !mediaUrl && (
+            <div className="mt-3">
+              <Label className="text-xs text-muted-foreground">Or paste a media URL</Label>
+              <Input
+                value={mediaUrl}
+                onChange={(e) => setMediaUrl(e.target.value)}
+                placeholder="https://... (image or video URL)"
+                className="mt-1"
+                disabled={publishing || uploading}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Link URL */}
+        <div>
+          <Label className="flex items-center gap-2">
+            <Link2 className="w-4 h-4" /> Link URL (optional)
+          </Label>
+          <Input
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            placeholder="https://..."
+            className="mt-1.5"
+            disabled={publishing}
+          />
         </div>
 
         {/* Channel Selection */}
