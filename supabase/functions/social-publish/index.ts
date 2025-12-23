@@ -805,14 +805,16 @@ async function publishToThreads(
 
 // Refresh YouTube access token if expired
 async function refreshYouTubeToken(
-  refreshToken: string
-): Promise<{ accessToken: string; expiresAt: Date } | null> {
+  refreshToken: string,
+  socialAccountId: string,
+  supabase: any
+): Promise<{ accessToken: string; expiresAt: Date; error?: string } | { accessToken: null; error: string; needsReconnect: boolean }> {
   const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
   const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
 
   if (!clientId || !clientSecret) {
     console.error('YouTube OAuth credentials not configured');
-    return null;
+    return { accessToken: null, error: 'YouTube OAuth credentials not configured', needsReconnect: false };
   }
 
   try {
@@ -830,7 +832,35 @@ async function refreshYouTubeToken(
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       console.error('YouTube token refresh failed:', errorData);
-      return null;
+      
+      // Check for invalid_grant error - means refresh token is revoked/expired
+      const isTokenRevoked = 
+        errorData.error === 'invalid_grant' || 
+        errorData.error_description?.includes('Token has been expired or revoked') ||
+        errorData.error_description?.includes('Token has been revoked') ||
+        response.status === 400 || 
+        response.status === 401;
+      
+      if (isTokenRevoked) {
+        console.log('YouTube refresh token is invalid/revoked, marking account for reconnection');
+        
+        // Update the social account status to needs_refresh
+        await supabase
+          .from('social_accounts')
+          .update({
+            status: 'needs_refresh',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', socialAccountId);
+        
+        return { 
+          accessToken: null, 
+          error: 'Your YouTube connection has expired. Please reconnect your YouTube account in the Channels page.',
+          needsReconnect: true 
+        };
+      }
+      
+      return { accessToken: null, error: 'Failed to refresh YouTube token', needsReconnect: false };
     }
 
     const data = await response.json();
@@ -842,7 +872,7 @@ async function refreshYouTubeToken(
     };
   } catch (error) {
     console.error('YouTube token refresh error:', error);
-    return null;
+    return { accessToken: null, error: 'Network error refreshing YouTube token', needsReconnect: false };
   }
 }
 
@@ -881,9 +911,9 @@ async function publishToYouTube(
 
     if (expiresAt < fiveMinutesFromNow && refreshToken) {
       console.log('YouTube access token expired or expiring soon, refreshing...');
-      const refreshed = await refreshYouTubeToken(refreshToken);
+      const refreshed = await refreshYouTubeToken(refreshToken, socialAccountId, supabase);
       
-      if (refreshed) {
+      if (refreshed.accessToken) {
         currentAccessToken = refreshed.accessToken;
         
         // Update the token in the database
@@ -891,17 +921,20 @@ async function publishToYouTube(
           .from('oauth_tokens')
           .update({
             access_token: refreshed.accessToken,
-            expires_at: refreshed.expiresAt.toISOString(),
+            expires_at: (refreshed as { accessToken: string; expiresAt: Date }).expiresAt.toISOString(),
             updated_at: new Date().toISOString(),
           })
           .eq('social_account_id', socialAccountId);
         
         console.log('YouTube token refreshed successfully');
       } else {
-        console.error('Failed to refresh YouTube token');
-        return { success: false, error: 'Failed to refresh YouTube authentication. Please reconnect your YouTube account.' };
+        console.error('Failed to refresh YouTube token:', refreshed.error);
+        return { success: false, error: refreshed.error || 'Failed to refresh YouTube authentication. Please reconnect your YouTube account.' };
       }
     }
+  } else if (!refreshToken) {
+    // No expiration data and no refresh token - try anyway but warn
+    console.log('No token expiration data found, attempting with current token');
   }
 
   try {
