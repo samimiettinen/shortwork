@@ -365,13 +365,15 @@ Deno.serve(async (req) => {
           account.platform,
           {
             accountId: account.platform_user_id,
+            socialAccountId: account.id,
             accessToken: token.access_token,
             refreshToken: token.refresh_token || undefined,
             content,
             linkUrl,
             mediaUrl,
             mediaType,
-          }
+          },
+          supabase
         );
 
         results.push({
@@ -443,15 +445,17 @@ async function publishToProvider(
   platform: string,
   options: {
     accountId: string;
+    socialAccountId: string;
     accessToken: string;
     refreshToken?: string;
     content: string;
     linkUrl?: string;
     mediaUrl?: string;
     mediaType?: string;
-  }
+  },
+  supabase: any
 ): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
-  const { accountId, accessToken, content, linkUrl, mediaUrl } = options;
+  const { accountId, socialAccountId, accessToken, content, linkUrl, mediaUrl } = options;
 
   switch (platform) {
     case 'facebook':
@@ -476,7 +480,7 @@ async function publishToProvider(
       return publishToThreads(accountId, accessToken, content, mediaUrl);
     
     case 'youtube':
-      return publishToYouTube(accessToken, content, mediaUrl, options.mediaType);
+      return publishToYouTube(accessToken, options.refreshToken, socialAccountId, supabase, content, mediaUrl, options.mediaType);
     
     default:
       return { success: false, error: `Unsupported platform: ${platform}` };
@@ -799,8 +803,54 @@ async function publishToThreads(
   }
 }
 
+// Refresh YouTube access token if expired
+async function refreshYouTubeToken(
+  refreshToken: string
+): Promise<{ accessToken: string; expiresAt: Date } | null> {
+  const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
+  const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
+
+  if (!clientId || !clientSecret) {
+    console.error('YouTube OAuth credentials not configured');
+    return null;
+  }
+
+  try {
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('YouTube token refresh failed:', errorData);
+      return null;
+    }
+
+    const data = await response.json();
+    const expiresAt = new Date(Date.now() + (data.expires_in * 1000));
+
+    return {
+      accessToken: data.access_token,
+      expiresAt,
+    };
+  } catch (error) {
+    console.error('YouTube token refresh error:', error);
+    return null;
+  }
+}
+
 async function publishToYouTube(
   accessToken: string,
+  refreshToken: string | undefined,
+  socialAccountId: string,
+  supabase: any,
   description: string,
   videoUrl?: string,
   mediaType?: string
@@ -811,6 +861,47 @@ async function publishToYouTube(
 
   if (mediaType !== 'video') {
     return { success: false, error: 'YouTube only supports video content' };
+  }
+
+  let currentAccessToken = accessToken;
+
+  // Check if we need to refresh the token
+  // Get the token's expiration from the database
+  const { data: tokenData } = await supabase
+    .from('oauth_tokens')
+    .select('expires_at')
+    .eq('social_account_id', socialAccountId)
+    .single();
+
+  if (tokenData?.expires_at) {
+    const expiresAt = new Date(tokenData.expires_at);
+    const now = new Date();
+    // Refresh if token expires within 5 minutes
+    const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
+
+    if (expiresAt < fiveMinutesFromNow && refreshToken) {
+      console.log('YouTube access token expired or expiring soon, refreshing...');
+      const refreshed = await refreshYouTubeToken(refreshToken);
+      
+      if (refreshed) {
+        currentAccessToken = refreshed.accessToken;
+        
+        // Update the token in the database
+        await supabase
+          .from('oauth_tokens')
+          .update({
+            access_token: refreshed.accessToken,
+            expires_at: refreshed.expiresAt.toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('social_account_id', socialAccountId);
+        
+        console.log('YouTube token refreshed successfully');
+      } else {
+        console.error('Failed to refresh YouTube token');
+        return { success: false, error: 'Failed to refresh YouTube authentication. Please reconnect your YouTube account.' };
+      }
+    }
   }
 
   try {
@@ -848,7 +939,7 @@ async function publishToYouTube(
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': `Bearer ${currentAccessToken}`,
           'Content-Type': 'application/json; charset=UTF-8',
           'X-Upload-Content-Length': videoSize.toString(),
           'X-Upload-Content-Type': videoBlob.type || 'video/mp4',
