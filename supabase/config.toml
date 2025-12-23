@@ -26,3 +26,6 @@ verify_jwt = true
 
 [functions.threads-insights]
 verify_jwt = true
+
+[functions.admin-delete]
+verify_jwt = true
