@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useErrorHandler } from "@/hooks/use-error-handler";
 import { 
   Send, Loader2, AlertCircle, CheckCircle, Link2, Image, 
-  Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Upload, X, Youtube, FileVideo, Play
+  Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Upload, X, Youtube, FileVideo, Play, RefreshCw
 } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 
@@ -72,6 +73,7 @@ interface SocialPublisherProps {
 export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
   const { toast } = useToast();
   const { handleError } = useErrorHandler();
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
@@ -86,6 +88,23 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
   const [publishing, setPublishing] = useState(false);
   const [results, setResults] = useState<PublishResult[] | null>(null);
   const [videoPreviewOpen, setVideoPreviewOpen] = useState(false);
+
+  // Helper to check if error requires reconnection
+  const needsReconnection = (error?: string) => {
+    if (!error) return false;
+    const reconnectKeywords = [
+      'reconnect',
+      'expired',
+      'invalid authentication',
+      'authentication credentials',
+      'OAuth',
+      'access token',
+      'refresh token',
+    ];
+    return reconnectKeywords.some(keyword => 
+      error.toLowerCase().includes(keyword.toLowerCase())
+    );
+  };
 
   useEffect(() => {
     loadAccounts();
@@ -660,10 +679,25 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
           <Alert variant="destructive">
             <AlertCircle className="w-4 h-4" />
             <AlertDescription>
-              <ul className="mt-1 space-y-1">
+              <ul className="mt-1 space-y-2">
                 {results.filter(r => !r.success).map((r, i) => (
                   <li key={i} className="text-sm">
-                    <strong>{r.platform}:</strong> {r.error}
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <strong className="capitalize">{r.platform}:</strong> {r.error}
+                      </div>
+                      {needsReconnection(r.error) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0 h-7 text-xs bg-background hover:bg-muted"
+                          onClick={() => navigate('/channels')}
+                        >
+                          <RefreshCw className="w-3 h-3 mr-1" />
+                          Reconnect
+                        </Button>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>
