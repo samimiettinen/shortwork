@@ -339,7 +339,10 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
           workspaceId,
           content,
           linkUrl: linkUrl || undefined,
-          mediaUrl: mediaUrl || undefined,
+          // Prioritize uploaded media over manually entered URL
+          mediaUrl: uploadedMedia?.url || mediaUrl || undefined,
+          // Pass the media type for platform-specific validation
+          mediaType: uploadedMedia?.type || undefined,
           targetAccountIds: selectedAccounts,
         },
       });
