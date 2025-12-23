@@ -107,13 +107,12 @@ const Channels = () => {
       const accountIds = accounts.map(a => a.id);
       const { data: tokens, error } = await supabase
         .from('oauth_tokens')
-        .select('social_account_id, expires_at, updated_at')
+        .select('social_account_id, expires_at, updated_at, refresh_token')
         .in('social_account_id', accountIds);
 
       if (error) throw error;
 
       const now = new Date();
-      const expirationThreshold = 24 * 60 * 60 * 1000; // 24 hours
       let expiredCount = 0;
       let refreshedCount = 0;
       const accountsNeedingRefresh: string[] = [];
@@ -123,15 +122,18 @@ const Channels = () => {
           const expiresAt = new Date(token.expires_at);
           const timeUntilExpiry = expiresAt.getTime() - now.getTime();
           
-          // Token expired or expires within 24 hours
-          if (timeUntilExpiry < expirationThreshold) {
+          // Only mark as expired if:
+          // 1. Token has actually expired (not just expiring soon)
+          // 2. AND there's no refresh token to renew it
+          // Short-lived access tokens with refresh tokens (like Google/YouTube) should NOT be marked as needing refresh
+          if (timeUntilExpiry < 0 && !token.refresh_token) {
             expiredCount++;
             accountsNeedingRefresh.push(token.social_account_id);
           }
         }
       });
 
-      // Update account status for expired tokens
+      // Update account status for truly expired tokens (no refresh token available)
       if (accountsNeedingRefresh.length > 0) {
         const { error: updateError } = await supabase
           .from('social_accounts')
