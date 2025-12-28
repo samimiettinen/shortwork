@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Zap, Calendar, Send, BarChart3, ArrowRight, Check } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -83,8 +84,18 @@ const Index = () => {
       </main>
 
       <footer className="border-t border-border py-8">
-        <div className="container mx-auto px-4 text-center text-muted-foreground">
-          <p>&copy; 2024 ShortsPublish. Built with Lovable.</p>
+        <div className="container mx-auto px-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-muted-foreground">&copy; 2024 ShortsPublish. Built with Lovable.</p>
+            <div className="flex items-center gap-6">
+              <Link to="/privacy-policy" className="text-muted-foreground hover:text-foreground transition-colors text-sm">
+                Privacy Policy
+              </Link>
+              <Link to="/terms-of-service" className="text-muted-foreground hover:text-foreground transition-colors text-sm">
+                Terms of Service
+              </Link>
+            </div>
+          </div>
         </div>
       </footer>
     </div>
