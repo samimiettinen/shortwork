@@ -2,8 +2,9 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Zap, Calendar, Send, BarChart3, ArrowRight, Check } from "lucide-react";
+import { Calendar, Send, BarChart3, ArrowRight, Check, Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
+import logo from "@/assets/logo.png";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -26,10 +27,7 @@ const Index = () => {
       <header className="border-b border-border">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg bg-gradient-primary flex items-center justify-center">
-              <Zap className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="font-display font-bold text-xl">ShortsPublish</span>
+            <img src={logo} alt="ShortWork" className="h-10 w-auto" />
           </div>
           <Button onClick={() => navigate("/auth")} variant="outline">Sign In</Button>
         </div>
@@ -39,7 +37,7 @@ const Index = () => {
         <section className="py-20 lg:py-32">
           <div className="container mx-auto px-4 text-center">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6 animate-fade-in">
-              <Zap className="w-4 h-4" /> The smarter way to publish
+              <Sparkles className="w-4 h-4" /> The smarter way to publish
             </div>
             <h1 className="text-4xl lg:text-6xl font-display font-bold max-w-3xl mx-auto leading-tight animate-slide-up">
               Schedule & publish <span className="text-gradient">short videos</span> everywhere
@@ -86,7 +84,7 @@ const Index = () => {
       <footer className="border-t border-border py-8">
         <div className="container mx-auto px-4">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-muted-foreground">&copy; 2024 ShortsPublish. Built with Lovable.</p>
+            <p className="text-muted-foreground">&copy; 2024 ShortWork. Built with Lovable.</p>
             <div className="flex items-center gap-6">
               <Link to="/privacy-policy" className="text-muted-foreground hover:text-foreground transition-colors text-sm">
                 Privacy Policy
