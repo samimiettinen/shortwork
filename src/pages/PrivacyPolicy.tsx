@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 
 const PrivacyPolicy = () => {
   const lastUpdated = "December 28, 2024";
-  const appName = "Social Media Manager";
-  const contactEmail = "privacy@yourdomain.com";
+  const appName = "Shortwork";
+  const contactEmail = "privacy@shortwork.lovable.app";
 
   return (
     <div className="min-h-screen bg-background">
