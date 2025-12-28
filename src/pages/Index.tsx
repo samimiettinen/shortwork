@@ -28,6 +28,7 @@ const Index = () => {
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <img src={logo} alt="ShortWork" className="h-10 w-auto" />
+            <span className="font-display font-bold text-xl">ShortWork</span>
           </div>
           <Button onClick={() => navigate("/auth")} variant="outline">Sign In</Button>
         </div>
