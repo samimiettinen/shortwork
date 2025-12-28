@@ -17,6 +17,7 @@ import AcceptInvite from "./pages/AcceptInvite";
 import WorkspaceSettings from "./pages/WorkspaceSettings";
 import Analytics from "./pages/Analytics";
 import NotFound from "./pages/NotFound";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,6 +50,7 @@ const App = () => (
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/drafts" element={<Dashboard />} />
             <Route path="/history" element={<Dashboard />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
