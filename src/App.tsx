@@ -19,6 +19,7 @@ import Analytics from "./pages/Analytics";
 import NotFound from "./pages/NotFound";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
+import DataDeletion from "./pages/DataDeletion";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,6 +54,7 @@ const App = () => (
             <Route path="/history" element={<Dashboard />} />
             <Route path="/privacy-policy" element={<PrivacyPolicy />} />
             <Route path="/terms-of-service" element={<TermsOfService />} />
+            <Route path="/data-deletion" element={<DataDeletion />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
