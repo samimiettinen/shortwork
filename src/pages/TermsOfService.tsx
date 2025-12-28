@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 
 const TermsOfService = () => {
   const lastUpdated = "December 28, 2024";
-  const appName = "Social Media Manager";
-  const contactEmail = "support@yourdomain.com";
+  const appName = "Shortwork";
+  const contactEmail = "support@shortwork.lovable.app";
 
   return (
     <div className="min-h-screen bg-background">
