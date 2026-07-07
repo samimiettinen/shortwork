@@ -379,7 +379,6 @@ async function saveAccountWithToken(
     return { ok: false };
   }
 
-  const { encryptToken } = await import("../_shared/token-crypto.ts");
   const { error: tokenError } = await supabase
     .from('oauth_tokens')
     .upsert({
