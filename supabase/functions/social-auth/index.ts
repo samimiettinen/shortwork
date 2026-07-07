@@ -378,12 +378,13 @@ async function saveAccountWithToken(
     return { ok: false };
   }
 
+  const { encryptToken } = await import("../_shared/token-crypto.ts");
   const { error: tokenError } = await supabase
     .from('oauth_tokens')
     .upsert({
       social_account_id: account.id,
-      access_token: token.accessToken,
-      refresh_token: token.refreshToken ?? null,
+      access_token: await encryptToken(token.accessToken),
+      refresh_token: token.refreshToken ? await encryptToken(token.refreshToken) : null,
       expires_at: token.expiresIn
         ? new Date(Date.now() + token.expiresIn * 1000).toISOString()
         : null,
