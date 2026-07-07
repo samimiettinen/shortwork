@@ -433,8 +433,8 @@ Deno.serve(async (req) => {
         const options: PublishOptions = {
           accountId: account.platform_user_id,
           socialAccountId: account.id,
-          accessToken: token.access_token,
-          refreshToken: token.refresh_token || undefined,
+          accessToken: await decryptToken(token.access_token),
+          refreshToken: token.refresh_token ? await decryptToken(token.refresh_token) : undefined,
           tokenExpiresAt: token.expires_at,
           content,
           linkUrl,
