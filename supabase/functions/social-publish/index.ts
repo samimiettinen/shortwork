@@ -9,8 +9,9 @@ import {
 } from "../_shared/publishers.ts";
 
 // If a mediaUrl points at our private "social-media" storage bucket, replace
-// it with a short-lived signed URL so external platforms (Meta, IG, Threads)
-// can still fetch the file. Returns null when the URL is external.
+// it with a fresh short-lived signed URL so external platforms (Meta, IG,
+// Threads) can fetch the file. Accepts either legacy public URLs or already
+// signed URLs from the client (they get re-signed for a fresh TTL).
 async function maybeSignInternalMediaUrl(
   supabase: any,
   supabaseUrl: string,
@@ -20,12 +21,9 @@ async function maybeSignInternalMediaUrl(
     const projectHost = new URL(supabaseUrl).host;
     const parsed = new URL(mediaUrl);
     if (parsed.host !== projectHost) return null;
-    // Public URL format: /storage/v1/object/public/social-media/<path>
-    // Sign URL format:  /storage/v1/object/sign/social-media/<path>?token=...
-    const marker = '/storage/v1/object/public/social-media/';
-    const idx = parsed.pathname.indexOf(marker);
-    if (idx === -1) return null;
-    const path = decodeURIComponent(parsed.pathname.slice(idx + marker.length));
+    const match = parsed.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/social-media\/(.+)$/);
+    if (!match) return null;
+    const path = decodeURIComponent(match[1]);
     if (!path) return null;
     const { data, error } = await supabase
       .storage
