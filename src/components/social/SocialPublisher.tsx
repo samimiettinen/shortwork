@@ -697,7 +697,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
                       <div>
                         <strong className="capitalize">{r.platform}:</strong> {r.error}
                       </div>
-                      {needsReconnection(r.error) && (
+                      {needsReconnection(r) && (
                         <Button
                           variant="outline"
                           size="sm"
