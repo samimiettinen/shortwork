@@ -21,8 +21,11 @@ Deno.serve(async (req) => {
   }
 
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const schedulerSecret = Deno.env.get('SCHEDULER_SECRET') || '';
   const auth = req.headers.get('Authorization') || '';
-  if (auth !== `Bearer ${serviceKey}`) {
+  // Accept either the service-role key (manual invocation) or the shared
+  // SCHEDULER_SECRET used by the cron job.
+  if (auth !== `Bearer ${serviceKey}` && (!schedulerSecret || auth !== `Bearer ${schedulerSecret}`)) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
