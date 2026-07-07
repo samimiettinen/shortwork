@@ -16,6 +16,7 @@ import TeamMembers from "./pages/TeamMembers";
 import AcceptInvite from "./pages/AcceptInvite";
 import WorkspaceSettings from "./pages/WorkspaceSettings";
 import Analytics from "./pages/Analytics";
+import Platforms from "./pages/Platforms";
 import NotFound from "./pages/NotFound";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
