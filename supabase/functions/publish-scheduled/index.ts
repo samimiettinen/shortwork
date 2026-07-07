@@ -121,9 +121,15 @@ async function runJob(supabase: any, job: any) {
   }
 
   const overrides = (target.posts.per_channel_overrides || {}) as any;
-  const mediaUrl: string | undefined = overrides.media_url;
+  let mediaUrl: string | undefined = overrides.media_url;
   const mediaType: 'image' | 'video' | undefined = overrides.media_type;
   const mediaMeta: MediaMeta | undefined = overrides.media_meta;
+
+  // Re-sign internal storage URLs (the social-media bucket is private).
+  if (mediaUrl) {
+    const signed = await signInternalMediaUrl(supabase, mediaUrl);
+    if (signed) mediaUrl = signed;
+  }
 
   let mediaBlob: Blob | null = null;
   if (mediaUrl && NEEDS_MEDIA_BYTES.has(target.platform)) {
