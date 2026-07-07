@@ -49,6 +49,8 @@ interface UploadedMedia {
   size: number;
   thumbnailUrl?: string;
   duration?: number;
+  width?: number;
+  height?: number;
 }
 
 const platformIcons: Record<string, React.ReactNode> = {
@@ -161,13 +163,17 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
       // Generate thumbnail for video files
       let thumbnailUrl: string | undefined;
       let duration: number | undefined;
-      
+      let width: number | undefined;
+      let height: number | undefined;
+
       if (isVideo) {
         try {
           setUploadProgress(5);
           const thumbData = await generateVideoThumbnail(file);
           thumbnailUrl = thumbData.thumbnailUrl;
           duration = thumbData.duration;
+          width = thumbData.width;
+          height = thumbData.height;
           setUploadProgress(15);
         } catch (thumbError) {
           console.warn('Could not generate thumbnail:', thumbError);
@@ -207,6 +213,8 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
         size: file.size,
         thumbnailUrl,
         duration,
+        width,
+        height,
       });
       setMediaUrl(publicUrl);
 
@@ -251,7 +259,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const generateVideoThumbnail = (file: File): Promise<{ thumbnailUrl: string; duration: number }> => {
+  const generateVideoThumbnail = (file: File): Promise<{ thumbnailUrl: string; duration: number; width: number; height: number }> => {
     return new Promise((resolve, reject) => {
       const video = document.createElement('video');
       const canvas = document.createElement('canvas');
@@ -273,13 +281,15 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
         
         const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.8);
         const duration = video.duration;
-        
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+
         // Cleanup
         URL.revokeObjectURL(video.src);
         video.remove();
         canvas.remove();
-        
-        resolve({ thumbnailUrl, duration });
+
+        resolve({ thumbnailUrl, duration, width, height });
       };
       
       video.onerror = () => {
@@ -362,6 +372,13 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
           mediaUrl: uploadedMedia?.url || mediaUrl || undefined,
           // Pass the media type for platform-specific validation
           mediaType: uploadedMedia?.type || undefined,
+          // Video dimensions/duration let the backend pick Reels vs regular
+          // video and validate per-platform duration limits
+          mediaMeta: uploadedMedia ? {
+            width: uploadedMedia.width,
+            height: uploadedMedia.height,
+            durationSeconds: uploadedMedia.duration,
+          } : undefined,
           targetAccountIds: selectedAccounts,
         },
       });

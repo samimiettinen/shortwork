@@ -146,7 +146,7 @@ export const PLATFORM_CONFIG: Record<ProviderName, {
     supportsVideo: true,
     supportsLinks: false,
     oauthRequired: true,
-    setupInstructions: 'Requires TikTok for Developers account'
+    setupInstructions: 'Requires TikTok for Developers account with Content Posting API (Direct Post). Posts are private (SELF_ONLY) until the app passes TikTok\'s audit.'
   },
   threads: {
     displayName: 'Threads',
@@ -165,7 +165,7 @@ export const PLATFORM_CONFIG: Record<ProviderName, {
     bgClass: 'platform-bluesky',
     maxLength: 300,
     supportsImages: true,
-    supportsVideo: false,
+    supportsVideo: true, // up to 100MB via the Bluesky video service
     supportsLinks: true,
     oauthRequired: false,
     setupInstructions: 'Use your Bluesky handle and an App Password'
