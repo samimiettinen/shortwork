@@ -1,9 +1,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { corsHeaders } from "../_shared/cors.ts";
+import {
+  encodeState,
+  decodeState,
+  generateCodeVerifier,
+  codeChallengeS256,
+  OAuthState,
+} from "../_shared/oauth-state.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+const GRAPH_VERSION = 'v25.0';
 
 // Provider configurations
 const PROVIDERS = {
@@ -11,31 +16,45 @@ const PROVIDERS = {
     authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenUrl: 'https://oauth2.googleapis.com/token',
     scopes: ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/userinfo.profile'],
+    scopeDelimiter: ' ',
+    clientKeyParam: 'client_id',
   },
   facebook: {
-    authUrl: 'https://www.facebook.com/v18.0/dialog/oauth',
-    tokenUrl: 'https://graph.facebook.com/v18.0/oauth/access_token',
-    scopes: ['pages_manage_posts', 'pages_read_engagement', 'pages_show_list'],
+    authUrl: `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`,
+    tokenUrl: `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token`,
+    scopes: ['pages_manage_posts', 'pages_read_engagement', 'pages_show_list', 'publish_video', 'business_management'],
+    scopeDelimiter: ',',
+    clientKeyParam: 'client_id',
   },
   instagram: {
-    authUrl: 'https://www.facebook.com/v18.0/dialog/oauth',
-    tokenUrl: 'https://graph.facebook.com/v18.0/oauth/access_token',
-    scopes: ['instagram_basic', 'instagram_content_publish', 'pages_show_list', 'pages_read_engagement'],
+    authUrl: `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`,
+    tokenUrl: `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token`,
+    scopes: ['instagram_basic', 'instagram_content_publish', 'pages_show_list', 'pages_read_engagement', 'business_management'],
+    scopeDelimiter: ',',
+    clientKeyParam: 'client_id',
   },
   linkedin: {
     authUrl: 'https://www.linkedin.com/oauth/v2/authorization',
     tokenUrl: 'https://www.linkedin.com/oauth/v2/accessToken',
     scopes: ['openid', 'profile', 'w_member_social'],
+    scopeDelimiter: ' ',
+    clientKeyParam: 'client_id',
   },
   x: {
-    authUrl: 'https://twitter.com/i/oauth2/authorize',
-    tokenUrl: 'https://api.twitter.com/2/oauth2/token',
-    scopes: ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
+    authUrl: 'https://x.com/i/oauth2/authorize',
+    tokenUrl: 'https://api.x.com/2/oauth2/token',
+    // media.write is required for video/image upload via the v2 media endpoints
+    scopes: ['tweet.read', 'tweet.write', 'users.read', 'media.write', 'offline.access'],
+    scopeDelimiter: ' ',
+    clientKeyParam: 'client_id',
   },
   tiktok: {
     authUrl: 'https://www.tiktok.com/v2/auth/authorize/',
     tokenUrl: 'https://open.tiktokapis.com/v2/oauth/token/',
     scopes: ['user.info.basic', 'video.publish'],
+    // TikTok uses comma-separated scopes and client_key instead of client_id
+    scopeDelimiter: ',',
+    clientKeyParam: 'client_key',
   },
   threads: {
     authUrl: 'https://threads.net/oauth/authorize',
@@ -43,22 +62,14 @@ const PROVIDERS = {
     scopes: [
       'threads_basic',
       'threads_content_publish',
-      'threads_delete',
-      'threads_keyword_search',
       'threads_manage_insights',
-      'threads_manage_mentions',
       'threads_manage_replies',
       'threads_read_replies'
     ],
+    scopeDelimiter: ',',
+    clientKeyParam: 'client_id',
   },
 };
-
-interface OAuthState {
-  userId: string;
-  workspaceId: string;
-  provider: string;
-  returnUrl: string;
-}
 
 Deno.serve(async (req) => {
   // Handle CORS preflight
@@ -68,7 +79,7 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url);
   const pathParts = url.pathname.split('/').filter(Boolean);
-  
+
   // Expected paths: /social-auth/connect/:provider or /social-auth/callback/:provider
   const action = pathParts[1]; // 'connect' or 'callback'
   const provider = pathParts[2];
@@ -102,6 +113,36 @@ Deno.serve(async (req) => {
   }
 });
 
+// Verify the caller is the authenticated user and a member of the workspace
+async function verifyCaller(
+  req: Request,
+  supabase: any,
+  userId: string,
+  workspaceId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) return { ok: false, error: 'Missing authorization header' };
+
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user || user.id !== userId) {
+    return { ok: false, error: 'Invalid authentication' };
+  }
+
+  const { data: membership } = await supabase
+    .from('workspace_members')
+    .select('role')
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', user.id)
+    .single();
+
+  if (!membership || !['owner', 'admin', 'editor'].includes(membership.role)) {
+    return { ok: false, error: 'Not authorized for this workspace' };
+  }
+
+  return { ok: true };
+}
+
 async function handleConnect(req: Request, provider: string, supabase: any) {
   const body = await req.json();
   const { userId, workspaceId, returnUrl } = body;
@@ -109,6 +150,14 @@ async function handleConnect(req: Request, provider: string, supabase: any) {
   if (!userId || !workspaceId) {
     return new Response(JSON.stringify({ error: 'Missing userId or workspaceId' }), {
       status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const caller = await verifyCaller(req, supabase, userId, workspaceId);
+  if (!caller.ok) {
+    return new Response(JSON.stringify({ error: caller.error }), {
+      status: 403,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -121,16 +170,12 @@ async function handleConnect(req: Request, provider: string, supabase: any) {
     });
   }
 
-  // Create state token for security
-  const state: OAuthState = { userId, workspaceId, provider, returnUrl: returnUrl || '/channels' };
-  const stateToken = btoa(JSON.stringify(state));
-
   // Get environment variables for this provider
   const clientId = Deno.env.get(`${provider.toUpperCase()}_CLIENT_ID`);
   const redirectUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/social-auth/callback/${provider}`;
 
   if (!clientId) {
-    return new Response(JSON.stringify({ 
+    return new Response(JSON.stringify({
       error: `${provider} integration not configured`,
       message: `Please configure ${provider.toUpperCase()}_CLIENT_ID in your environment variables`
     }), {
@@ -139,13 +184,14 @@ async function handleConnect(req: Request, provider: string, supabase: any) {
     });
   }
 
-  // Build OAuth URL
+  // PKCE verifier for providers that require it (X)
+  let codeVerifier: string | undefined;
+
   const params = new URLSearchParams({
-    client_id: clientId,
+    [providerConfig.clientKeyParam]: clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: providerConfig.scopes.join(' '),
-    state: stateToken,
+    scope: providerConfig.scopes.join(providerConfig.scopeDelimiter),
   });
 
   // Provider-specific parameters
@@ -157,9 +203,20 @@ async function handleConnect(req: Request, provider: string, supabase: any) {
   }
 
   if (provider === 'x') {
-    params.set('code_challenge', 'challenge');
-    params.set('code_challenge_method', 'plain');
+    codeVerifier = generateCodeVerifier();
+    params.set('code_challenge', await codeChallengeS256(codeVerifier));
+    params.set('code_challenge_method', 'S256');
   }
+
+  // Signed state token binds the callback to this user + workspace
+  const stateToken = encodeState({
+    userId,
+    workspaceId,
+    provider,
+    returnUrl: returnUrl || '/channels',
+    codeVerifier,
+  });
+  params.set('state', stateToken);
 
   const authUrl = `${providerConfig.authUrl}?${params.toString()}`;
 
@@ -178,21 +235,16 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
 
   console.log('Callback received:', { provider, hasCode: !!code, hasState: !!stateToken, error });
 
+  const state = stateToken ? decodeState(stateToken) : null;
+
   if (error) {
-    const returnUrl = stateToken ? JSON.parse(atob(stateToken)).returnUrl : '/channels';
+    const returnUrl = state?.returnUrl || '/channels';
     console.log('OAuth error from provider:', error);
     return Response.redirect(`${appUrl}${returnUrl}?error=${encodeURIComponent(error)}`, 302);
   }
 
-  if (!code || !stateToken) {
-    return new Response('Missing code or state', { status: 400, headers: corsHeaders });
-  }
-
-  let state: OAuthState;
-  try {
-    state = JSON.parse(atob(stateToken));
-  } catch {
-    return new Response('Invalid state', { status: 400, headers: corsHeaders });
+  if (!code || !state || state.provider !== provider) {
+    return new Response('Missing or invalid code/state', { status: 400, headers: corsHeaders });
   }
 
   const providerConfig = PROVIDERS[provider as keyof typeof PROVIDERS];
@@ -210,71 +262,73 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
   try {
     // Exchange code for token
     console.log('Exchanging code for token with:', providerConfig.tokenUrl);
-    
-    const tokenResponse = await fetch(providerConfig.tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
-      }),
+
+    const tokenParams = new URLSearchParams({
+      [providerConfig.clientKeyParam]: clientId,
+      code,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
     });
 
-    const tokenData = await tokenResponse.json();
+    const tokenHeaders: Record<string, string> = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    };
+
+    if (provider === 'x') {
+      // X: confidential clients authenticate with HTTP basic auth; PKCE verifier required
+      tokenHeaders['Authorization'] = `Basic ${btoa(`${clientId}:${clientSecret}`)}`;
+      if (state.codeVerifier) tokenParams.set('code_verifier', state.codeVerifier);
+    } else {
+      tokenParams.set('client_secret', clientSecret);
+    }
+
+    const tokenResponse = await fetch(providerConfig.tokenUrl, {
+      method: 'POST',
+      headers: tokenHeaders,
+      body: tokenParams,
+    });
+
+    let tokenData = await tokenResponse.json();
     console.log('Token response status:', tokenResponse.status, 'hasAccessToken:', !!tokenData.access_token);
 
-    if (tokenData.error) {
+    if (tokenData.error || !tokenData.access_token) {
       console.error('Token error:', tokenData);
-      return Response.redirect(`${appUrl}${state.returnUrl}?error=${encodeURIComponent(tokenData.error_description || tokenData.error)}`, 302);
+      const description = tokenData.error_description || tokenData.error?.message || tokenData.error || 'token_exchange_failed';
+      return Response.redirect(`${appUrl}${state.returnUrl}?error=${encodeURIComponent(String(description))}`, 302);
+    }
+
+    // Threads issues a short-lived (1h) token; exchange it for a 60-day token
+    if (provider === 'threads') {
+      const llResponse = await fetch(
+        `https://graph.threads.net/access_token?grant_type=th_exchange_token&client_secret=${clientSecret}&access_token=${tokenData.access_token}`
+      );
+      const llData = await llResponse.json();
+      if (llData.access_token) {
+        tokenData = { ...tokenData, access_token: llData.access_token, expires_in: llData.expires_in };
+      } else {
+        console.error('Threads long-lived token exchange failed:', llData);
+      }
+    }
+
+    // Facebook/Instagram connect at the Page level: exchange for a long-lived
+    // user token, then enumerate managed Pages (and their IG business accounts)
+    if (provider === 'facebook' || provider === 'instagram') {
+      return await handleMetaCallback(provider, tokenData.access_token, clientId, clientSecret, state, supabase, appUrl);
     }
 
     // Get user profile based on provider
     const accountData = await getProviderAccountData(provider, tokenData);
     console.log('Account data retrieved:', { provider, displayName: accountData.displayName });
 
-    // Save to database
-    const { data: account, error: dbError } = await supabase
-      .from('social_accounts')
-      .upsert({
-        workspace_id: state.workspaceId,
-        platform: provider,
-        platform_user_id: accountData.providerAccountId,
-        display_name: accountData.displayName,
-        handle: accountData.handle,
-        avatar_url: accountData.avatarUrl,
-        account_type: accountData.accountType,
-        autopublish_capable: true,
-        status: 'connected',
-        last_connected_at: new Date().toISOString(),
-      }, {
-        onConflict: 'workspace_id,platform,platform_user_id',
-      })
-      .select()
-      .single();
+    const saved = await saveAccountWithToken(supabase, state.workspaceId, provider, accountData, {
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token,
+      expiresIn: tokenData.expires_in,
+      scope: providerConfig.scopes.join(providerConfig.scopeDelimiter),
+    });
 
-    if (dbError) {
-      console.error('DB error:', dbError);
+    if (!saved.ok) {
       return Response.redirect(`${appUrl}${state.returnUrl}?error=database_error`, 302);
-    }
-
-    // Store tokens separately (more secure)
-    const { error: tokenError } = await supabase
-      .from('oauth_tokens')
-      .upsert({
-        social_account_id: account.id,
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token,
-        expires_at: tokenData.expires_in 
-          ? new Date(Date.now() + tokenData.expires_in * 1000).toISOString() 
-          : null,
-        scope: providerConfig.scopes.join(' '),
-      });
-    
-    if (tokenError) {
-      console.error('Token storage error:', tokenError);
     }
 
     // Redirect back to app
@@ -285,7 +339,155 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
   }
 }
 
-async function getProviderAccountData(provider: string, tokenData: any) {
+interface AccountData {
+  providerAccountId: string;
+  displayName: string;
+  handle?: string;
+  avatarUrl?: string;
+  accountType: 'personal' | 'page' | 'business' | 'creator';
+}
+
+async function saveAccountWithToken(
+  supabase: any,
+  workspaceId: string,
+  platform: string,
+  accountData: AccountData,
+  token: { accessToken: string; refreshToken?: string; expiresIn?: number; scope?: string }
+): Promise<{ ok: boolean; accountId?: string }> {
+  const { data: account, error: dbError } = await supabase
+    .from('social_accounts')
+    .upsert({
+      workspace_id: workspaceId,
+      platform,
+      platform_user_id: accountData.providerAccountId,
+      display_name: accountData.displayName,
+      handle: accountData.handle,
+      avatar_url: accountData.avatarUrl,
+      account_type: accountData.accountType,
+      autopublish_capable: true,
+      status: 'connected',
+      last_connected_at: new Date().toISOString(),
+    }, {
+      onConflict: 'workspace_id,platform,platform_user_id',
+    })
+    .select()
+    .single();
+
+  if (dbError) {
+    console.error('DB error:', dbError);
+    return { ok: false };
+  }
+
+  const { error: tokenError } = await supabase
+    .from('oauth_tokens')
+    .upsert({
+      social_account_id: account.id,
+      access_token: token.accessToken,
+      refresh_token: token.refreshToken ?? null,
+      expires_at: token.expiresIn
+        ? new Date(Date.now() + token.expiresIn * 1000).toISOString()
+        : null,
+      scope: token.scope,
+      updated_at: new Date().toISOString(),
+    }, {
+      onConflict: 'social_account_id',
+    });
+
+  if (tokenError) {
+    console.error('Token storage error:', tokenError);
+    return { ok: false };
+  }
+
+  return { ok: true, accountId: account.id };
+}
+
+// Facebook/Instagram: publishing requires PAGE access tokens (Facebook) or the
+// Instagram professional account id + page token (Instagram). Store one
+// social_account per Page / IG account, each with its own page token.
+async function handleMetaCallback(
+  provider: 'facebook' | 'instagram',
+  userToken: string,
+  clientId: string,
+  clientSecret: string,
+  state: OAuthState,
+  supabase: any,
+  appUrl: string
+) {
+  // 1. Exchange for a long-lived user token (~60 days); page tokens derived
+  //    from it do not expire.
+  const llResponse = await fetch(
+    `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token?grant_type=fb_exchange_token&client_id=${clientId}&client_secret=${clientSecret}&fb_exchange_token=${userToken}`
+  );
+  const llData = await llResponse.json();
+  const longLivedToken = llData.access_token || userToken;
+  if (!llData.access_token) {
+    console.error('Long-lived token exchange failed:', llData);
+  }
+
+  // 2. Enumerate managed pages with their tokens and linked IG accounts
+  const pagesResponse = await fetch(
+    `https://graph.facebook.com/${GRAPH_VERSION}/me/accounts?fields=id,name,access_token,picture{url},instagram_business_account{id,username,name,profile_picture_url}&limit=100&access_token=${longLivedToken}`
+  );
+  const pagesData = await pagesResponse.json();
+
+  if (pagesData.error) {
+    console.error('Pages fetch error:', pagesData.error);
+    return Response.redirect(`${appUrl}${state.returnUrl}?error=${encodeURIComponent(pagesData.error.message)}`, 302);
+  }
+
+  const pages: any[] = pagesData.data || [];
+  if (pages.length === 0) {
+    return Response.redirect(`${appUrl}${state.returnUrl}?error=${encodeURIComponent('No Facebook Pages found. Publishing requires a Facebook Page (Instagram requires an Instagram professional account linked to a Page).')}`, 302);
+  }
+
+  let savedCount = 0;
+
+  for (const page of pages) {
+    if (!page.access_token) continue;
+
+    if (provider === 'facebook') {
+      const saved = await saveAccountWithToken(supabase, state.workspaceId, 'facebook', {
+        providerAccountId: page.id,
+        displayName: page.name,
+        avatarUrl: page.picture?.data?.url,
+        accountType: 'page',
+      }, {
+        accessToken: page.access_token,
+        scope: 'pages_manage_posts,publish_video',
+      });
+      if (saved.ok) savedCount++;
+    } else {
+      const ig = page.instagram_business_account;
+      if (!ig?.id) continue;
+      // Instagram publishing endpoints are called with the (long-lived) USER
+      // token; it lasts ~60 days and cannot be refreshed programmatically —
+      // the account is flagged needs_refresh when it expires.
+      const saved = await saveAccountWithToken(supabase, state.workspaceId, 'instagram', {
+        providerAccountId: ig.id,
+        displayName: ig.name || ig.username || page.name,
+        handle: ig.username ? `@${ig.username}` : undefined,
+        avatarUrl: ig.profile_picture_url,
+        accountType: 'business',
+      }, {
+        accessToken: longLivedToken,
+        expiresIn: llData.expires_in || 5184000,
+        scope: 'instagram_content_publish',
+      });
+      if (saved.ok) savedCount++;
+    }
+  }
+
+  if (savedCount === 0) {
+    const reason = provider === 'instagram'
+      ? 'No Instagram professional account linked to your Facebook Pages. Link one in Meta Business settings and try again.'
+      : 'Could not retrieve Page access tokens.';
+    return Response.redirect(`${appUrl}${state.returnUrl}?error=${encodeURIComponent(reason)}`, 302);
+  }
+
+  return Response.redirect(`${appUrl}${state.returnUrl}?connected=${provider}`, 302);
+}
+
+async function getProviderAccountData(provider: string, tokenData: any): Promise<AccountData> {
   const accessToken = tokenData.access_token;
 
   switch (provider) {
@@ -295,7 +497,7 @@ async function getProviderAccountData(provider: string, tokenData: any) {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       const userData = await userResponse.json();
-      
+
       // Get YouTube channel info
       const channelResponse = await fetch(
         'https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true',
@@ -303,26 +505,13 @@ async function getProviderAccountData(provider: string, tokenData: any) {
       );
       const channelData = await channelResponse.json();
       const channel = channelData.items?.[0];
-      
+
       return {
         providerAccountId: channel?.id || userData.id,
         displayName: channel?.snippet?.title || userData.name,
         handle: channel ? `@${channel.snippet.customUrl?.replace('@', '') || channel.id}` : undefined,
         avatarUrl: channel?.snippet?.thumbnails?.default?.url || userData.picture,
         accountType: 'creator' as const,
-      };
-    }
-    case 'facebook':
-    case 'instagram': {
-      const response = await fetch(
-        `https://graph.facebook.com/v18.0/me?fields=id,name,picture&access_token=${accessToken}`
-      );
-      const data = await response.json();
-      return {
-        providerAccountId: data.id,
-        displayName: data.name,
-        avatarUrl: data.picture?.data?.url,
-        accountType: 'page' as const,
       };
     }
     case 'linkedin': {
@@ -338,7 +527,7 @@ async function getProviderAccountData(provider: string, tokenData: any) {
       };
     }
     case 'x': {
-      const response = await fetch('https://api.twitter.com/2/users/me', {
+      const response = await fetch('https://api.x.com/2/users/me', {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       const data = await response.json();
@@ -400,6 +589,14 @@ async function handleBlueskyAuth(req: Request, supabase: any) {
     });
   }
 
+  const caller = await verifyCaller(req, supabase, userId, workspaceId);
+  if (!caller.ok) {
+    return new Response(JSON.stringify({ error: caller.error }), {
+      status: 403,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
     // Create session with Bluesky
     const response = await fetch('https://bsky.social/xrpc/com.atproto.server.createSession', {
@@ -410,7 +607,7 @@ async function handleBlueskyAuth(req: Request, supabase: any) {
 
     if (!response.ok) {
       const errorData = await response.json();
-      return new Response(JSON.stringify({ 
+      return new Response(JSON.stringify({
         error: 'Authentication failed',
         message: errorData.message || 'Invalid credentials'
       }), {
@@ -421,44 +618,29 @@ async function handleBlueskyAuth(req: Request, supabase: any) {
 
     const sessionData = await response.json();
 
-    // Save to database
-    const { data: account, error: dbError } = await supabase
-      .from('social_accounts')
-      .upsert({
-        workspace_id: workspaceId,
-        platform: 'bluesky',
-        platform_user_id: sessionData.did,
-        display_name: sessionData.handle,
-        handle: `@${sessionData.handle}`,
-        account_type: 'personal',
-        autopublish_capable: true,
-        status: 'connected',
-        last_connected_at: new Date().toISOString(),
-      }, {
-        onConflict: 'workspace_id,platform,platform_user_id',
-      })
-      .select()
-      .single();
+    const saved = await saveAccountWithToken(supabase, workspaceId, 'bluesky', {
+      providerAccountId: sessionData.did,
+      displayName: sessionData.handle,
+      handle: `@${sessionData.handle}`,
+      accountType: 'personal',
+    }, {
+      accessToken: sessionData.accessJwt,
+      refreshToken: sessionData.refreshJwt,
+      // Bluesky access JWTs are short-lived; publishers refresh via refreshSession
+      expiresIn: 60 * 60,
+    });
 
-    if (dbError) {
-      console.error('DB error:', dbError);
+    if (!saved.ok) {
       return new Response(JSON.stringify({ error: 'Failed to save account' }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Store tokens
-    await supabase.from('oauth_tokens').upsert({
-      social_account_id: account.id,
-      access_token: sessionData.accessJwt,
-      refresh_token: sessionData.refreshJwt,
-    });
-
-    return new Response(JSON.stringify({ 
-      success: true, 
+    return new Response(JSON.stringify({
+      success: true,
       account: {
-        id: account.id,
+        id: saved.accountId,
         displayName: sessionData.handle,
         handle: `@${sessionData.handle}`,
       }
@@ -477,11 +659,35 @@ async function handleBlueskyAuth(req: Request, supabase: any) {
 
 async function handleDisconnect(req: Request, provider: string, supabase: any) {
   const body = await req.json();
-  const { accountId, workspaceId } = body;
+  const { accountId, workspaceId, userId } = body;
 
   if (!accountId || !workspaceId) {
     return new Response(JSON.stringify({ error: 'Missing accountId or workspaceId' }), {
       status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Only authenticated workspace owners/admins/editors may disconnect
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user } } = await supabase.auth.getUser(token);
+  if (!user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+  const caller = await verifyCaller(req, supabase, userId || user.id, workspaceId);
+  if (!caller.ok) {
+    return new Response(JSON.stringify({ error: caller.error }), {
+      status: 403,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }

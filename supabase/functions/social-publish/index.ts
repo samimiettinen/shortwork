@@ -1,10 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { createHmac } from "node:crypto";
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { corsHeaders } from "../_shared/cors.ts";
+import {
+  publishToProvider,
+  fetchMediaBlob,
+  PublishOptions,
+  MediaMeta,
+} from "../_shared/publishers.ts";
 
 interface PublishRequest {
   workspaceId: string;
@@ -12,6 +13,7 @@ interface PublishRequest {
   linkUrl?: string;
   mediaUrl?: string;
   mediaType?: 'image' | 'video';
+  mediaMeta?: MediaMeta;
   targetAccountIds: string[];
 }
 
@@ -22,6 +24,7 @@ interface PublishResult {
   postId?: string;
   postUrl?: string;
   error?: string;
+  needsReconnect?: boolean;
 }
 
 // UUID validation regex
@@ -39,6 +42,9 @@ const PLATFORM_LIMITS: Record<string, number> = {
   tiktok: 2200,
 };
 
+// Platforms that need the media bytes server-side (vs a public URL)
+const NEEDS_MEDIA_BYTES = new Set(['youtube', 'tiktok', 'x', 'linkedin', 'bluesky']);
+
 // Validate and sanitize URL
 function validateUrl(url: string | undefined): { valid: boolean; sanitized?: string; error?: string } {
   if (!url || url.trim() === '') {
@@ -47,12 +53,12 @@ function validateUrl(url: string | undefined): { valid: boolean; sanitized?: str
 
   try {
     const parsed = new URL(url);
-    
+
     // Only allow http/https protocols
     if (!['http:', 'https:'].includes(parsed.protocol)) {
       return { valid: false, error: 'Only HTTP/HTTPS URLs are allowed' };
     }
-    
+
     // Block localhost and internal IPs
     const hostname = parsed.hostname.toLowerCase();
     if (
@@ -65,7 +71,7 @@ function validateUrl(url: string | undefined): { valid: boolean; sanitized?: str
     ) {
       return { valid: false, error: 'Internal URLs are not allowed' };
     }
-    
+
     return { valid: true, sanitized: parsed.toString() };
   } catch {
     return { valid: false, error: 'Invalid URL format' };
@@ -73,10 +79,10 @@ function validateUrl(url: string | undefined): { valid: boolean; sanitized?: str
 }
 
 // Validate request body
-function validatePublishRequest(body: unknown): { 
-  valid: boolean; 
-  data?: PublishRequest; 
-  error?: string 
+function validatePublishRequest(body: unknown): {
+  valid: boolean;
+  data?: PublishRequest;
+  error?: string
 } {
   if (!body || typeof body !== 'object') {
     return { valid: false, error: 'Invalid request body' };
@@ -130,10 +136,21 @@ function validatePublishRequest(body: unknown): {
   }
 
   // Validate mediaType (optional)
-  if (request.mediaType !== undefined && 
-      request.mediaType !== 'image' && 
+  if (request.mediaType !== undefined &&
+      request.mediaType !== 'image' &&
       request.mediaType !== 'video') {
     return { valid: false, error: 'mediaType must be "image" or "video"' };
+  }
+
+  // Validate mediaMeta (optional)
+  let mediaMeta: MediaMeta | undefined;
+  if (request.mediaMeta && typeof request.mediaMeta === 'object') {
+    const meta = request.mediaMeta as Record<string, unknown>;
+    mediaMeta = {
+      width: typeof meta.width === 'number' ? meta.width : undefined,
+      height: typeof meta.height === 'number' ? meta.height : undefined,
+      durationSeconds: typeof meta.durationSeconds === 'number' ? meta.durationSeconds : undefined,
+    };
   }
 
   return {
@@ -144,6 +161,7 @@ function validatePublishRequest(body: unknown): {
       linkUrl: linkValidation.sanitized,
       mediaUrl: mediaValidation.sanitized,
       mediaType: request.mediaType as 'image' | 'video' | undefined,
+      mediaMeta,
       targetAccountIds: request.targetAccountIds as string[],
     },
   };
@@ -173,18 +191,12 @@ function validateContentForPlatform(
     };
   }
 
-  // YouTube requires video
-  if (platform === 'youtube') {
-    if (!hasMedia) {
+  // YouTube and TikTok require video
+  if (platform === 'youtube' || platform === 'tiktok') {
+    if (!hasMedia || mediaType !== 'video') {
       return {
         valid: false,
-        error: 'YouTube requires a video file',
-      };
-    }
-    if (mediaType !== 'video') {
-      return {
-        valid: false,
-        error: 'YouTube only supports video content',
+        error: `${platform === 'youtube' ? 'YouTube' : 'TikTok'} requires a video file`,
       };
     }
   }
@@ -233,6 +245,55 @@ async function validateWorkspaceAccess(
   return { authorized: true, userId: user.id };
 }
 
+// Record the publish in posts/post_targets so the Queue page has history
+async function recordPublishHistory(
+  supabase: any,
+  workspaceId: string,
+  userId: string,
+  request: PublishRequest,
+  results: PublishResult[],
+  accounts: any[]
+) {
+  try {
+    const successCount = results.filter(r => r.success).length;
+    const { data: post } = await supabase
+      .from('posts')
+      .insert({
+        workspace_id: workspaceId,
+        created_by: userId,
+        status: successCount > 0 ? 'published' : 'failed',
+        title: request.content.split('\n')[0].substring(0, 120),
+        body_text: request.content,
+        link_url: request.linkUrl,
+        per_channel_overrides: request.mediaUrl
+          ? { media_url: request.mediaUrl, media_type: request.mediaType }
+          : {},
+      })
+      .select()
+      .single();
+
+    if (!post) return;
+
+    const targets = results.map(r => {
+      const account = accounts.find(a => a.id === r.accountId);
+      return {
+        post_id: post.id,
+        social_account_id: r.accountId,
+        platform: account?.platform || r.platform,
+        status: r.success ? 'published' : 'failed',
+        remote_post_id: r.postId,
+        publish_attempts: 1,
+        last_error_message: r.error,
+        last_attempt_at: new Date().toISOString(),
+        published_at: r.success ? new Date().toISOString() : null,
+      };
+    });
+    await supabase.from('post_targets').insert(targets);
+  } catch (error) {
+    console.error('Failed to record publish history:', error);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -278,7 +339,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { workspaceId, content, linkUrl, mediaUrl, mediaType, targetAccountIds } = validation.data;
+    const { workspaceId, content, linkUrl, mediaUrl, mediaType, mediaMeta, targetAccountIds } = validation.data;
 
     // Validate workspace access and permissions
     const authResult = await validateWorkspaceAccess(
@@ -295,10 +356,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log('Publishing content:', { 
-      userId: authResult.userId, 
-      workspaceId, 
-      accountCount: targetAccountIds.length 
+    console.log('Publishing content:', {
+      userId: authResult.userId,
+      workspaceId,
+      accountCount: targetAccountIds.length
     });
 
     // Get target accounts with tokens
@@ -327,11 +388,20 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Publish to each platform
-    const results: PublishResult[] = [];
+    // Download the media once and share the bytes across all platforms that
+    // upload server-side (YouTube, TikTok, X, LinkedIn, Bluesky)
+    let mediaBlob: Blob | null = null;
+    if (mediaUrl && accounts.some(a => NEEDS_MEDIA_BYTES.has(a.platform))) {
+      try {
+        mediaBlob = await fetchMediaBlob(mediaUrl);
+      } catch (error) {
+        console.error('Media prefetch failed:', error);
+        // URL-based platforms can still work; byte-based ones will retry the fetch
+      }
+    }
 
-    for (const account of accounts) {
-      // Validate content for platform
+    // Publish to all platforms in parallel
+    const results: PublishResult[] = await Promise.all(accounts.map(async (account: any): Promise<PublishResult> => {
       const platformValidation = validateContentForPlatform(
         account.platform,
         content,
@@ -340,58 +410,58 @@ Deno.serve(async (req) => {
       );
 
       if (!platformValidation.valid) {
-        results.push({
+        return {
           accountId: account.id,
           platform: account.platform,
           success: false,
           error: platformValidation.error,
-        });
-        continue;
+        };
       }
 
       const token = account.oauth_tokens?.[0];
       if (!token?.access_token) {
-        results.push({
+        return {
           accountId: account.id,
           platform: account.platform,
           success: false,
           error: 'No access token found',
-        });
-        continue;
+        };
       }
 
       try {
-        const result = await publishToProvider(
-          account.platform,
-          {
-            accountId: account.platform_user_id,
-            socialAccountId: account.id,
-            accessToken: token.access_token,
-            refreshToken: token.refresh_token || undefined,
-            content,
-            linkUrl,
-            mediaUrl,
-            mediaType,
-          },
-          supabase
-        );
-
-        results.push({
+        const options: PublishOptions = {
+          accountId: account.platform_user_id,
+          socialAccountId: account.id,
+          accessToken: token.access_token,
+          refreshToken: token.refresh_token || undefined,
+          tokenExpiresAt: token.expires_at,
+          content,
+          linkUrl,
+          mediaUrl,
+          mediaType,
+          mediaMeta,
+          mediaBlob,
+        };
+        const result = await publishToProvider(account.platform, options, supabase);
+        return {
           accountId: account.id,
           platform: account.platform,
           ...result,
-        });
+        };
       } catch (error: unknown) {
         console.error(`Publish error for ${account.platform}:`, error);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        results.push({
+        return {
           accountId: account.id,
           platform: account.platform,
           success: false,
           error: errorMessage,
-        });
+        };
       }
-    }
+    }));
+
+    // Record history so the Queue page can show past publishes
+    await recordPublishHistory(supabase, workspaceId, authResult.userId!, validation.data, results, accounts);
 
     // Log audit entry for publish action
     try {
@@ -414,11 +484,11 @@ Deno.serve(async (req) => {
 
     // Determine overall status
     const successCount = results.filter(r => r.success).length;
-    const status = successCount === results.length ? 'published' 
-      : successCount > 0 ? 'partial' 
+    const status = successCount === results.length ? 'published'
+      : successCount > 0 ? 'partial'
       : 'failed';
 
-    return new Response(JSON.stringify({ 
+    return new Response(JSON.stringify({
       success: successCount > 0,
       status,
       results,
@@ -440,593 +510,3 @@ Deno.serve(async (req) => {
     });
   }
 });
-
-async function publishToProvider(
-  platform: string,
-  options: {
-    accountId: string;
-    socialAccountId: string;
-    accessToken: string;
-    refreshToken?: string;
-    content: string;
-    linkUrl?: string;
-    mediaUrl?: string;
-    mediaType?: string;
-  },
-  supabase: any
-): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
-  const { accountId, socialAccountId, accessToken, content, linkUrl, mediaUrl } = options;
-
-  switch (platform) {
-    case 'facebook':
-      return publishToFacebook(accountId, accessToken, content, linkUrl, mediaUrl);
-    
-    case 'linkedin':
-      return publishToLinkedIn(accountId, accessToken, content, linkUrl, mediaUrl);
-    
-    case 'x':
-      return publishToX(accessToken, content);
-    
-    case 'bluesky':
-      return publishToBluesky(accountId, accessToken, options.refreshToken!, content, linkUrl);
-    
-    case 'instagram':
-      return publishToInstagram(accountId, accessToken, content, mediaUrl);
-    
-    case 'tiktok':
-      return { success: false, error: 'TikTok publishing requires video content - use the TikTok app' };
-    
-    case 'threads':
-      return publishToThreads(accountId, accessToken, content, mediaUrl);
-    
-    case 'youtube':
-      return publishToYouTube(accessToken, options.refreshToken, socialAccountId, supabase, content, mediaUrl, options.mediaType);
-    
-    default:
-      return { success: false, error: `Unsupported platform: ${platform}` };
-  }
-}
-
-async function publishToFacebook(
-  pageId: string,
-  accessToken: string,
-  message: string,
-  link?: string,
-  photoUrl?: string
-): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
-  try {
-    let endpoint = `https://graph.facebook.com/v18.0/${pageId}/feed`;
-    const body: Record<string, string> = { message, access_token: accessToken };
-
-    if (photoUrl) {
-      endpoint = `https://graph.facebook.com/v18.0/${pageId}/photos`;
-      body.url = photoUrl;
-    } else if (link) {
-      body.link = link;
-    }
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    const data = await response.json();
-
-    if (data.error) {
-      return { success: false, error: data.error.message };
-    }
-
-    return {
-      success: true,
-      postId: data.id || data.post_id,
-      postUrl: `https://facebook.com/${data.id}`,
-    };
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: errorMessage };
-  }
-}
-
-async function publishToLinkedIn(
-  personUrn: string,
-  accessToken: string,
-  text: string,
-  articleUrl?: string,
-  imageUrl?: string
-): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
-  try {
-    const body: any = {
-      author: `urn:li:person:${personUrn}`,
-      lifecycleState: 'PUBLISHED',
-      specificContent: {
-        'com.linkedin.ugc.ShareContent': {
-          shareCommentary: { text },
-          shareMediaCategory: articleUrl ? 'ARTICLE' : 'NONE',
-        },
-      },
-      visibility: {
-        'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC',
-      },
-    };
-
-    if (articleUrl) {
-      body.specificContent['com.linkedin.ugc.ShareContent'].media = [{
-        status: 'READY',
-        originalUrl: articleUrl,
-      }];
-    }
-
-    const response = await fetch('https://api.linkedin.com/v2/ugcPosts', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'X-Restli-Protocol-Version': '2.0.0',
-      },
-      body: JSON.stringify(body),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      return { success: false, error: data.message || 'LinkedIn API error' };
-    }
-
-    return {
-      success: true,
-      postId: data.id,
-      postUrl: `https://linkedin.com/feed/update/${data.id}`,
-    };
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: errorMessage };
-  }
-}
-
-async function publishToX(
-  accessToken: string,
-  text: string
-): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
-  try {
-    const response = await fetch('https://api.twitter.com/2/tweets', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ text }),
-    });
-
-    const data = await response.json();
-
-    if (data.errors || !response.ok) {
-      return { success: false, error: data.errors?.[0]?.message || data.detail || 'X API error' };
-    }
-
-    return {
-      success: true,
-      postId: data.data.id,
-      postUrl: `https://x.com/i/status/${data.data.id}`,
-    };
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: errorMessage };
-  }
-}
-
-async function publishToBluesky(
-  did: string,
-  accessJwt: string,
-  refreshJwt: string,
-  text: string,
-  linkUrl?: string
-): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
-  try {
-    // Create the post record
-    const record: any = {
-      $type: 'app.bsky.feed.post',
-      text: linkUrl ? `${text}\n\n${linkUrl}` : text,
-      createdAt: new Date().toISOString(),
-    };
-
-    // Add link card if URL provided
-    if (linkUrl) {
-      record.facets = [{
-        index: {
-          byteStart: text.length + 2,
-          byteEnd: text.length + 2 + linkUrl.length,
-        },
-        features: [{
-          $type: 'app.bsky.richtext.facet#link',
-          uri: linkUrl,
-        }],
-      }];
-    }
-
-    const response = await fetch('https://bsky.social/xrpc/com.atproto.repo.createRecord', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessJwt}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        repo: did,
-        collection: 'app.bsky.feed.post',
-        record,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (data.error) {
-      return { success: false, error: data.message || data.error };
-    }
-
-    // Extract handle from DID for URL
-    const handle = did.replace('did:plc:', '');
-    const rkey = data.uri.split('/').pop();
-
-    return {
-      success: true,
-      postId: data.uri,
-      postUrl: `https://bsky.app/profile/${did}/post/${rkey}`,
-    };
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: errorMessage };
-  }
-}
-
-async function publishToInstagram(
-  accountId: string,
-  accessToken: string,
-  caption: string,
-  imageUrl?: string
-): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
-  if (!imageUrl) {
-    return { success: false, error: 'Instagram requires an image or video' };
-  }
-
-  try {
-    // Step 1: Create media container
-    const containerResponse = await fetch(
-      `https://graph.facebook.com/v18.0/${accountId}/media`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_url: imageUrl,
-          caption,
-          access_token: accessToken,
-        }),
-      }
-    );
-
-    const containerData = await containerResponse.json();
-
-    if (containerData.error) {
-      return { success: false, error: containerData.error.message };
-    }
-
-    // Step 2: Publish the container
-    const publishResponse = await fetch(
-      `https://graph.facebook.com/v18.0/${accountId}/media_publish`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creation_id: containerData.id,
-          access_token: accessToken,
-        }),
-      }
-    );
-
-    const publishData = await publishResponse.json();
-
-    if (publishData.error) {
-      return { success: false, error: publishData.error.message };
-    }
-
-    return {
-      success: true,
-      postId: publishData.id,
-      postUrl: `https://instagram.com/p/${publishData.id}`,
-    };
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: errorMessage };
-  }
-}
-
-async function publishToThreads(
-  accountId: string,
-  accessToken: string,
-  text: string,
-  mediaUrl?: string
-): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
-  try {
-    const body: Record<string, any> = {
-      text,
-      access_token: accessToken,
-      media_type: 'TEXT',
-    };
-
-    if (mediaUrl) {
-      body.media_type = 'IMAGE';
-      body.image_url = mediaUrl;
-    }
-
-    // Step 1: Create container
-    const containerResponse = await fetch(
-      `https://graph.threads.net/v1.0/${accountId}/threads`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }
-    );
-
-    const containerData = await containerResponse.json();
-
-    if (containerData.error) {
-      return { success: false, error: containerData.error.message };
-    }
-
-    // Step 2: Publish
-    const publishResponse = await fetch(
-      `https://graph.threads.net/v1.0/${accountId}/threads_publish`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creation_id: containerData.id,
-          access_token: accessToken,
-        }),
-      }
-    );
-
-    const publishData = await publishResponse.json();
-
-    if (publishData.error) {
-      return { success: false, error: publishData.error.message };
-    }
-
-    return {
-      success: true,
-      postId: publishData.id,
-      postUrl: `https://threads.net/t/${publishData.id}`,
-    };
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: errorMessage };
-  }
-}
-
-// Refresh YouTube access token if expired
-async function refreshYouTubeToken(
-  refreshToken: string,
-  socialAccountId: string,
-  supabase: any
-): Promise<{ accessToken: string; expiresAt: Date; error?: string } | { accessToken: null; error: string; needsReconnect: boolean }> {
-  const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
-  const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
-
-  if (!clientId || !clientSecret) {
-    console.error('YouTube OAuth credentials not configured');
-    return { accessToken: null, error: 'YouTube OAuth credentials not configured', needsReconnect: false };
-  }
-
-  try {
-    const response = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token',
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error('YouTube token refresh failed:', errorData);
-      
-      // Check for invalid_grant error - means refresh token is revoked/expired
-      const isTokenRevoked = 
-        errorData.error === 'invalid_grant' || 
-        errorData.error_description?.includes('Token has been expired or revoked') ||
-        errorData.error_description?.includes('Token has been revoked') ||
-        response.status === 400 || 
-        response.status === 401;
-      
-      if (isTokenRevoked) {
-        console.log('YouTube refresh token is invalid/revoked, marking account for reconnection');
-        
-        // Update the social account status to needs_refresh
-        await supabase
-          .from('social_accounts')
-          .update({
-            status: 'needs_refresh',
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', socialAccountId);
-        
-        return { 
-          accessToken: null, 
-          error: 'Your YouTube connection has expired. Please reconnect your YouTube account in the Channels page.',
-          needsReconnect: true 
-        };
-      }
-      
-      return { accessToken: null, error: 'Failed to refresh YouTube token', needsReconnect: false };
-    }
-
-    const data = await response.json();
-    const expiresAt = new Date(Date.now() + (data.expires_in * 1000));
-
-    return {
-      accessToken: data.access_token,
-      expiresAt,
-    };
-  } catch (error) {
-    console.error('YouTube token refresh error:', error);
-    return { accessToken: null, error: 'Network error refreshing YouTube token', needsReconnect: false };
-  }
-}
-
-async function publishToYouTube(
-  accessToken: string,
-  refreshToken: string | undefined,
-  socialAccountId: string,
-  supabase: any,
-  description: string,
-  videoUrl?: string,
-  mediaType?: string
-): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
-  if (!videoUrl) {
-    return { success: false, error: 'YouTube requires a video file' };
-  }
-
-  if (mediaType !== 'video') {
-    return { success: false, error: 'YouTube only supports video content' };
-  }
-
-  let currentAccessToken = accessToken;
-
-  // Check if we need to refresh the token
-  // Get the token's expiration from the database
-  const { data: tokenData } = await supabase
-    .from('oauth_tokens')
-    .select('expires_at')
-    .eq('social_account_id', socialAccountId)
-    .single();
-
-  if (tokenData?.expires_at) {
-    const expiresAt = new Date(tokenData.expires_at);
-    const now = new Date();
-    // Refresh if token expires within 5 minutes
-    const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
-
-    if (expiresAt < fiveMinutesFromNow && refreshToken) {
-      console.log('YouTube access token expired or expiring soon, refreshing...');
-      const refreshed = await refreshYouTubeToken(refreshToken, socialAccountId, supabase);
-      
-      if (refreshed.accessToken) {
-        currentAccessToken = refreshed.accessToken;
-        
-        // Update the token in the database
-        await supabase
-          .from('oauth_tokens')
-          .update({
-            access_token: refreshed.accessToken,
-            expires_at: (refreshed as { accessToken: string; expiresAt: Date }).expiresAt.toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('social_account_id', socialAccountId);
-        
-        console.log('YouTube token refreshed successfully');
-      } else {
-        console.error('Failed to refresh YouTube token:', refreshed.error);
-        return { success: false, error: refreshed.error || 'Failed to refresh YouTube authentication. Please reconnect your YouTube account.' };
-      }
-    }
-  } else if (!refreshToken) {
-    // No expiration data and no refresh token - try anyway but warn
-    console.log('No token expiration data found, attempting with current token');
-  }
-
-  try {
-    console.log('Starting YouTube video upload from URL:', videoUrl);
-
-    // Step 1: Fetch the video from the provided URL
-    const videoResponse = await fetch(videoUrl);
-    if (!videoResponse.ok) {
-      return { success: false, error: `Failed to fetch video: ${videoResponse.statusText}` };
-    }
-
-    const videoBlob = await videoResponse.blob();
-    const videoSize = videoBlob.size;
-    console.log('Video size:', videoSize, 'bytes');
-
-    // Extract title from description (first line or first 100 chars)
-    const lines = description.split('\n');
-    const title = lines[0].substring(0, 100) || 'Uploaded via Social Publisher';
-
-    // Step 2: Initialize resumable upload session
-    const metadata = {
-      snippet: {
-        title,
-        description,
-        categoryId: '22', // People & Blogs category
-      },
-      status: {
-        privacyStatus: 'public',
-        selfDeclaredMadeForKids: false,
-      },
-    };
-
-    const initResponse = await fetch(
-      'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${currentAccessToken}`,
-          'Content-Type': 'application/json; charset=UTF-8',
-          'X-Upload-Content-Length': videoSize.toString(),
-          'X-Upload-Content-Type': videoBlob.type || 'video/mp4',
-        },
-        body: JSON.stringify(metadata),
-      }
-    );
-
-    if (!initResponse.ok) {
-      const errorData = await initResponse.json().catch(() => ({}));
-      console.error('YouTube init upload error:', errorData);
-      return { 
-        success: false, 
-        error: errorData.error?.message || `Failed to initialize upload: ${initResponse.statusText}` 
-      };
-    }
-
-    const uploadUrl = initResponse.headers.get('Location');
-    if (!uploadUrl) {
-      return { success: false, error: 'Failed to get upload URL from YouTube' };
-    }
-
-    console.log('Got resumable upload URL, uploading video...');
-
-    // Step 3: Upload the video content
-    const uploadResponse = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': videoBlob.type || 'video/mp4',
-        'Content-Length': videoSize.toString(),
-      },
-      body: videoBlob,
-    });
-
-    if (!uploadResponse.ok) {
-      const errorData = await uploadResponse.json().catch(() => ({}));
-      console.error('YouTube video upload error:', errorData);
-      return { 
-        success: false, 
-        error: errorData.error?.message || `Failed to upload video: ${uploadResponse.statusText}` 
-      };
-    }
-
-    const uploadData = await uploadResponse.json();
-    console.log('YouTube upload successful:', uploadData.id);
-
-    return {
-      success: true,
-      postId: uploadData.id,
-      postUrl: `https://youtube.com/watch?v=${uploadData.id}`,
-    };
-  } catch (error: unknown) {
-    console.error('YouTube publish error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: errorMessage };
-  }
-}
