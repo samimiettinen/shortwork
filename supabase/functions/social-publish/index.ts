@@ -390,12 +390,20 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Media in our private "social-media" bucket needs a short-lived signed
+    // URL so external providers (Meta, Instagram, Threads) can fetch it.
+    let effectiveMediaUrl = mediaUrl;
+    if (mediaUrl) {
+      const signed = await maybeSignInternalMediaUrl(supabase, supabaseUrl, mediaUrl);
+      if (signed) effectiveMediaUrl = signed;
+    }
+
     // Download the media once and share the bytes across all platforms that
     // upload server-side (YouTube, TikTok, X, LinkedIn, Bluesky)
     let mediaBlob: Blob | null = null;
-    if (mediaUrl && accounts.some(a => NEEDS_MEDIA_BYTES.has(a.platform))) {
+    if (effectiveMediaUrl && accounts.some(a => NEEDS_MEDIA_BYTES.has(a.platform))) {
       try {
-        mediaBlob = await fetchMediaBlob(mediaUrl);
+        mediaBlob = await fetchMediaBlob(effectiveMediaUrl);
       } catch (error) {
         console.error('Media prefetch failed:', error);
         // URL-based platforms can still work; byte-based ones will retry the fetch
