@@ -5,6 +5,7 @@ import {
   fetchMediaBlob,
   PublishOptions,
   MediaMeta,
+  decryptToken,
 } from "../_shared/publishers.ts";
 
 interface PublishRequest {
