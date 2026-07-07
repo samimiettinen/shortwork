@@ -20,6 +20,7 @@ interface InvitationRequest {
 
 const handler = async (req: Request): Promise<Response> => {
   console.log("Send invitation function called");
+  const corsHeaders = getCorsHeaders(req.headers.get("Origin"));
 
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
