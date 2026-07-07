@@ -90,6 +90,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [results, setResults] = useState<PublishResult[] | null>(null);
+  const [reconnecting, setReconnecting] = useState<string | null>(null);
   const [videoPreviewOpen, setVideoPreviewOpen] = useState(false);
 
   // Backend now returns a needsReconnect flag; fall back to keyword sniff only
@@ -120,6 +121,50 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
       handleError(error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReconnect = async (platform: string, accountId: string) => {
+    // Bluesky uses app-password credentials, not OAuth — send user to Channels
+    if (platform === 'bluesky') {
+      navigate('/channels');
+      return;
+    }
+
+    setReconnecting(accountId);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const response = await supabase.functions.invoke('social-auth/connect/' + platform, {
+        body: { userId: user.id, workspaceId, returnUrl: '/compose' },
+      });
+
+      if (response.error) throw response.error;
+
+      const authUrl = response.data?.authUrl;
+      if (!authUrl) throw new Error(response.data?.message || 'Could not start reconnect');
+
+      const isInIframe = window.self !== window.top;
+      if (isInIframe) {
+        // Open in a new tab from a user-initiated click to bypass iframe/OAuth blockers
+        const win = window.open(authUrl, '_blank', 'noopener');
+        if (!win) {
+          toast({
+            title: 'Popup blocked',
+            description: 'Allow popups or open Channels to reconnect.',
+            variant: 'destructive',
+          });
+        } else {
+          toast({ title: 'Reconnecting…', description: `Complete sign-in in the new tab, then retry publish.` });
+        }
+      } else {
+        window.location.href = authUrl;
+      }
+    } catch (error) {
+      handleError(error);
+    } finally {
+      setReconnecting(null);
     }
   };
 
@@ -702,10 +747,14 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
                           variant="outline"
                           size="sm"
                           className="shrink-0 h-7 text-xs bg-background hover:bg-muted"
-                          onClick={() => navigate('/channels')}
+                          onClick={() => handleReconnect(r.platform, r.accountId)}
+                          disabled={reconnecting === r.accountId}
                         >
-                          <RefreshCw className="w-3 h-3 mr-1" />
-                          Reconnect
+                          {reconnecting === r.accountId ? (
+                            <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Opening…</>
+                          ) : (
+                            <><RefreshCw className="w-3 h-3 mr-1" /> Reconnect</>
+                          )}
                         </Button>
                       )}
                     </div>
