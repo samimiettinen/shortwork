@@ -22,10 +22,9 @@ async function signInternalMediaUrl(supabase: any, mediaUrl: string): Promise<st
     const projectHost = new URL(Deno.env.get('SUPABASE_URL')!).host;
     const parsed = new URL(mediaUrl);
     if (parsed.host !== projectHost) return null;
-    const marker = '/storage/v1/object/public/social-media/';
-    const idx = parsed.pathname.indexOf(marker);
-    if (idx === -1) return null;
-    const path = decodeURIComponent(parsed.pathname.slice(idx + marker.length));
+    const match = parsed.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/social-media\/(.+)$/);
+    if (!match) return null;
+    const path = decodeURIComponent(match[1]);
     const { data, error } = await supabase.storage.from('social-media').createSignedUrl(path, 60 * 60);
     if (error || !data?.signedUrl) return null;
     return data.signedUrl;
