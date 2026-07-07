@@ -16,6 +16,22 @@ import {
 const BATCH_SIZE = 25;
 const NEEDS_MEDIA_BYTES = new Set(['youtube', 'tiktok', 'x', 'linkedin', 'bluesky']);
 
+// If mediaUrl points at our private "social-media" bucket, produce a signed URL.
+async function signInternalMediaUrl(supabase: any, mediaUrl: string): Promise<string | null> {
+  try {
+    const projectHost = new URL(Deno.env.get('SUPABASE_URL')!).host;
+    const parsed = new URL(mediaUrl);
+    if (parsed.host !== projectHost) return null;
+    const marker = '/storage/v1/object/public/social-media/';
+    const idx = parsed.pathname.indexOf(marker);
+    if (idx === -1) return null;
+    const path = decodeURIComponent(parsed.pathname.slice(idx + marker.length));
+    const { data, error } = await supabase.storage.from('social-media').createSignedUrl(path, 60 * 60);
+    if (error || !data?.signedUrl) return null;
+    return data.signedUrl;
+  } catch { return null; }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
