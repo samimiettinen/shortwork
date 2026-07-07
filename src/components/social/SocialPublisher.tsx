@@ -40,6 +40,7 @@ interface PublishResult {
   postId?: string;
   postUrl?: string;
   error?: string;
+  needsReconnect?: boolean;
 }
 
 interface UploadedMedia {
