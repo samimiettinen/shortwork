@@ -7,6 +7,7 @@ import {
   codeChallengeS256,
   OAuthState,
 } from "../_shared/oauth-state.ts";
+import { encryptToken } from "../_shared/token-crypto.ts";
 
 const GRAPH_VERSION = 'v25.0';
 
