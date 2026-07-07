@@ -162,7 +162,7 @@ const handler = async (req: Request): Promise<Response> => {
 
     // Send invitation email
     const emailResponse = await resend.emails.send({
-      from: "Workspace Invitations <onboarding@resend.dev>",
+      from: INVITATION_FROM_EMAIL,
       to: [email],
       subject: `You've been invited to join ${workspace.name}`,
       html: `
