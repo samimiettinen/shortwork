@@ -21,18 +21,24 @@ Deno.serve(async (req) => {
   }
 
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const schedulerSecret = Deno.env.get('SCHEDULER_SECRET') || '';
+  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey);
+
+  // Load the shared scheduler token from public.app_config (seeded by
+  // migration; readable only by service_role). Accept either that token or
+  // the raw service-role key for manual invocation.
+  const { data: cfg } = await supabase
+    .from('app_config')
+    .select('value')
+    .eq('key', 'scheduler_token')
+    .maybeSingle();
+  const schedulerToken = cfg?.value || '';
   const auth = req.headers.get('Authorization') || '';
-  // Accept either the service-role key (manual invocation) or the shared
-  // SCHEDULER_SECRET used by the cron job.
-  if (auth !== `Bearer ${serviceKey}` && (!schedulerSecret || auth !== `Bearer ${schedulerSecret}`)) {
+  if (auth !== `Bearer ${serviceKey}` && (!schedulerToken || auth !== `Bearer ${schedulerToken}`)) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
-
-  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey);
   const now = new Date().toISOString();
   const processed: any[] = [];
 
