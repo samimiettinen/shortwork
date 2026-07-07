@@ -163,7 +163,7 @@ export function SchedulePost({ workspaceId }: { workspaceId: string }) {
         .insert(selectedAccounts.map(a => ({
           post_id: post.id,
           social_account_id: a.id,
-          platform: a.platform,
+          platform: a.platform as any,
           status: 'queued' as const,
         })))
         .select();
