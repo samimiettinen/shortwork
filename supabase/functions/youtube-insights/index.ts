@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { decryptToken } from "../_shared/token-crypto.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -41,7 +42,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const accessToken = tokenData.access_token;
+    const accessToken = await decryptToken(tokenData.access_token);
 
     // Get channel info
     console.log('Fetching YouTube channel info...');

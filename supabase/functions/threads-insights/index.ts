@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { ensureFreshToken } from "../_shared/publishers.ts";
+import { decryptToken } from "../_shared/token-crypto.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -52,8 +53,8 @@ Deno.serve(async (req) => {
     // Threads long-lived tokens can be programmatically refreshed while valid.
     const fresh = await ensureFreshToken('threads', {
       accountId: '', socialAccountId: accountId, content: '',
-      accessToken: tokenData.access_token,
-      refreshToken: tokenData.refresh_token || undefined,
+      accessToken: await decryptToken(tokenData.access_token),
+      refreshToken: tokenData.refresh_token ? await decryptToken(tokenData.refresh_token) : undefined,
       tokenExpiresAt: tokenData.expires_at,
     }, supabase);
     if (fresh.needsReconnect) {
