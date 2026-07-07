@@ -43,6 +43,20 @@ Multi-platform short-video publishing was just implemented on branch
    scope; FB/IG previously stored unusable user tokens; TikTok connect was
    broken before the client_key fix).
 
+Accounts the owner will connect once secrets are in place (Channels →
+Connect Channel, approving each consent screen):
+
+- TikTok `@samimiettinen` — posts stay private (SELF_ONLY) until the TikTok
+  app passes the Content Posting audit
+- Facebook — `facebook.com/sami.a.miettinen` is a personal profile; the API
+  can only publish to **Pages**, so connect will surface the user's managed
+  Pages (create a "Neuvottelija" Page first if none exists)
+- Threads `@neuvottelija`
+- LinkedIn `linkedin.com/in/neuvottelija` (personal profile, supported)
+- YouTube `youtube.com/@samimiettinen` (sign in with the owning Google account)
+- X `@samimiettinen` — connect only after this deploy so the media.write
+  scope is granted
+
 ## Task 2 — make scheduling work end to end
 
 The database schema already exists and must not be redesigned: `posts`
