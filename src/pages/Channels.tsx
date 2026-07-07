@@ -607,7 +607,7 @@ const Channels = () => {
                       {platformIcons.tiktok} TikTok
                     </div>
                     <p className="text-muted-foreground text-xs">
-                      Requires a TikTok account. Note: TikTok's API has limited functionality – videos may need to be finalized in the TikTok app.
+                      Direct posting is supported. Until your TikTok app passes the Content Posting audit, published videos stay private (SELF_ONLY) and are only visible to you in the TikTok app.
                     </p>
                   </div>
                   
