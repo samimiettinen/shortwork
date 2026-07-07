@@ -761,6 +761,7 @@ export type Database = {
       is_app_admin: { Args: { _user_id: string }; Returns: boolean }
       is_workspace_admin_or_owner: { Args: { ws_id: string }; Returns: boolean }
       is_workspace_member: { Args: { ws_id: string }; Returns: boolean }
+      trigger_publish_scheduled: { Args: never; Returns: undefined }
     }
     Enums: {
       account_status: "connected" | "needs_refresh" | "disconnected" | "error"
