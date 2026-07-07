@@ -83,16 +83,19 @@ async function markNeedsReconnect(supabase: any, socialAccountId: string) {
     .eq('id', socialAccountId);
 }
 
+import { encryptToken, decryptToken } from "./token-crypto.ts";
+export { decryptToken } from "./token-crypto.ts";
+
 async function persistToken(
   supabase: any,
   socialAccountId: string,
   token: { accessToken: string; refreshToken?: string; expiresAt?: Date | null }
 ) {
   const update: Record<string, unknown> = {
-    access_token: token.accessToken,
+    access_token: await encryptToken(token.accessToken),
     updated_at: new Date().toISOString(),
   };
-  if (token.refreshToken) update.refresh_token = token.refreshToken;
+  if (token.refreshToken) update.refresh_token = await encryptToken(token.refreshToken);
   if (token.expiresAt !== undefined) update.expires_at = token.expiresAt ? token.expiresAt.toISOString() : null;
 
   await supabase

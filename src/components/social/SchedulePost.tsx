@@ -90,9 +90,13 @@ export function SchedulePost({ workspaceId }: { workspaceId: string }) {
       const { data, error } = await supabase.storage.from('social-media').upload(path, file);
       clearInterval(iv);
       if (error) throw error;
-      const { data: { publicUrl } } = supabase.storage.from('social-media').getPublicUrl(data.path);
+      // Private bucket — signed URL for preview + publish (backend re-signs)
+      const { data: signed, error: signErr } = await supabase.storage
+        .from('social-media')
+        .createSignedUrl(data.path, 60 * 60 * 24);
+      if (signErr || !signed?.signedUrl) throw signErr || new Error('Could not sign upload URL');
       setProgress(100);
-      setMedia({ url: publicUrl, type: isVideo ? 'video' : 'image', ...meta });
+      setMedia({ url: signed.signedUrl, type: isVideo ? 'video' : 'image', ...meta });
       toast({ title: 'Upload complete' });
     } catch (err) {
       handleError(err);
@@ -105,7 +109,7 @@ export function SchedulePost({ workspaceId }: { workspaceId: string }) {
   const removeMedia = async () => {
     if (media) {
       const parts = media.url.split('/social-media/');
-      if (parts[1]) await supabase.storage.from('social-media').remove([parts[1]]);
+      if (parts[1]) await supabase.storage.from('social-media').remove([parts[1].split('?')[0]]);
     }
     setMedia(null);
   };

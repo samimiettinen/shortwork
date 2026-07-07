@@ -10,10 +10,26 @@ import {
   fetchMediaBlob,
   PublishOptions,
   MediaMeta,
+  decryptToken,
 } from "../_shared/publishers.ts";
 
 const BATCH_SIZE = 25;
 const NEEDS_MEDIA_BYTES = new Set(['youtube', 'tiktok', 'x', 'linkedin', 'bluesky']);
+
+// If mediaUrl points at our private "social-media" bucket, produce a signed URL.
+async function signInternalMediaUrl(supabase: any, mediaUrl: string): Promise<string | null> {
+  try {
+    const projectHost = new URL(Deno.env.get('SUPABASE_URL')!).host;
+    const parsed = new URL(mediaUrl);
+    if (parsed.host !== projectHost) return null;
+    const match = parsed.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/social-media\/(.+)$/);
+    if (!match) return null;
+    const path = decodeURIComponent(match[1]);
+    const { data, error } = await supabase.storage.from('social-media').createSignedUrl(path, 60 * 60);
+    if (error || !data?.signedUrl) return null;
+    return data.signedUrl;
+  } catch { return null; }
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -120,9 +136,15 @@ async function runJob(supabase: any, job: any) {
   }
 
   const overrides = (target.posts.per_channel_overrides || {}) as any;
-  const mediaUrl: string | undefined = overrides.media_url;
+  let mediaUrl: string | undefined = overrides.media_url;
   const mediaType: 'image' | 'video' | undefined = overrides.media_type;
   const mediaMeta: MediaMeta | undefined = overrides.media_meta;
+
+  // Re-sign internal storage URLs (the social-media bucket is private).
+  if (mediaUrl) {
+    const signed = await signInternalMediaUrl(supabase, mediaUrl);
+    if (signed) mediaUrl = signed;
+  }
 
   let mediaBlob: Blob | null = null;
   if (mediaUrl && NEEDS_MEDIA_BYTES.has(target.platform)) {
@@ -132,8 +154,8 @@ async function runJob(supabase: any, job: any) {
   const opts: PublishOptions = {
     accountId: target.social_accounts.platform_user_id,
     socialAccountId: target.social_accounts.id,
-    accessToken: token.access_token,
-    refreshToken: token.refresh_token || undefined,
+    accessToken: await decryptToken(token.access_token),
+    refreshToken: token.refresh_token ? await decryptToken(token.refresh_token) : undefined,
     tokenExpiresAt: token.expires_at,
     content: target.posts.body_text || '',
     linkUrl: target.posts.link_url || undefined,

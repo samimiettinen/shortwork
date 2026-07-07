@@ -238,15 +238,18 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
 
       if (error) throw error;
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
+      // Bucket is private — issue a signed URL for preview and publishing.
+      // Backend re-signs before dispatching to external providers.
+      const { data: signed, error: signErr } = await supabase.storage
         .from('social-media')
-        .getPublicUrl(data.path);
+        .createSignedUrl(data.path, 60 * 60 * 24);
+      if (signErr || !signed?.signedUrl) throw signErr || new Error('Could not sign upload URL');
+      const previewUrl = signed.signedUrl;
 
       setUploadProgress(100);
-      
+
       setUploadedMedia({
-        url: publicUrl,
+        url: previewUrl,
         type: isVideo ? 'video' : 'image',
         name: file.name,
         size: file.size,
@@ -255,7 +258,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
         width,
         height,
       });
-      setMediaUrl(publicUrl);
+      setMediaUrl(previewUrl);
 
       toast({
         title: "Upload complete",
@@ -274,12 +277,13 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
 
   const removeMedia = async () => {
     if (uploadedMedia) {
-      // Extract file path from URL
+      // Extract file path from URL (strip signed-URL query string)
       const urlParts = uploadedMedia.url.split('/social-media/');
       if (urlParts[1]) {
+        const path = urlParts[1].split('?')[0];
         await supabase.storage
           .from('social-media')
-          .remove([urlParts[1]]);
+          .remove([path]);
       }
     }
     setUploadedMedia(null);

@@ -1,12 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { ensureFreshToken } from "../_shared/publishers.ts";
+import { decryptToken } from "../_shared/token-crypto.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req.headers.get('Origin'));
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -35,8 +35,8 @@ Deno.serve(async (req) => {
     // Refresh X access token if it's within 5 min of expiring (X access = 2h)
     const fresh = await ensureFreshToken('x', {
       accountId: '', socialAccountId: accountId, content: '',
-      accessToken: tokenData.access_token,
-      refreshToken: tokenData.refresh_token || undefined,
+      accessToken: await decryptToken(tokenData.access_token),
+      refreshToken: tokenData.refresh_token ? await decryptToken(tokenData.refresh_token) : undefined,
       tokenExpiresAt: tokenData.expires_at,
     }, supabase);
 

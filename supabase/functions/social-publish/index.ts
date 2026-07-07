@@ -1,11 +1,44 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import {
   publishToProvider,
   fetchMediaBlob,
   PublishOptions,
   MediaMeta,
+  decryptToken,
 } from "../_shared/publishers.ts";
+
+// If a mediaUrl points at our private "social-media" storage bucket, replace
+// it with a fresh short-lived signed URL so external platforms (Meta, IG,
+// Threads) can fetch the file. Accepts either legacy public URLs or already
+// signed URLs from the client (they get re-signed for a fresh TTL).
+async function maybeSignInternalMediaUrl(
+  supabase: any,
+  supabaseUrl: string,
+  mediaUrl: string,
+): Promise<string | null> {
+  try {
+    const projectHost = new URL(supabaseUrl).host;
+    const parsed = new URL(mediaUrl);
+    if (parsed.host !== projectHost) return null;
+    const match = parsed.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/social-media\/(.+)$/);
+    if (!match) return null;
+    const path = decodeURIComponent(match[1]);
+    if (!path) return null;
+    const { data, error } = await supabase
+      .storage
+      .from('social-media')
+      .createSignedUrl(path, 60 * 60); // 1 hour
+    if (error || !data?.signedUrl) {
+      console.error('createSignedUrl failed', error);
+      return null;
+    }
+    return data.signedUrl;
+  } catch (e) {
+    console.error('maybeSignInternalMediaUrl error', e);
+    return null;
+  }
+}
 
 interface PublishRequest {
   workspaceId: string;
@@ -295,6 +328,7 @@ async function recordPublishHistory(
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req.headers.get('Origin'));
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -388,12 +422,20 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Media in our private "social-media" bucket needs a short-lived signed
+    // URL so external providers (Meta, Instagram, Threads) can fetch it.
+    let effectiveMediaUrl = mediaUrl;
+    if (mediaUrl) {
+      const signed = await maybeSignInternalMediaUrl(supabase, supabaseUrl, mediaUrl);
+      if (signed) effectiveMediaUrl = signed;
+    }
+
     // Download the media once and share the bytes across all platforms that
     // upload server-side (YouTube, TikTok, X, LinkedIn, Bluesky)
     let mediaBlob: Blob | null = null;
-    if (mediaUrl && accounts.some(a => NEEDS_MEDIA_BYTES.has(a.platform))) {
+    if (effectiveMediaUrl && accounts.some(a => NEEDS_MEDIA_BYTES.has(a.platform))) {
       try {
-        mediaBlob = await fetchMediaBlob(mediaUrl);
+        mediaBlob = await fetchMediaBlob(effectiveMediaUrl);
       } catch (error) {
         console.error('Media prefetch failed:', error);
         // URL-based platforms can still work; byte-based ones will retry the fetch
@@ -432,12 +474,12 @@ Deno.serve(async (req) => {
         const options: PublishOptions = {
           accountId: account.platform_user_id,
           socialAccountId: account.id,
-          accessToken: token.access_token,
-          refreshToken: token.refresh_token || undefined,
+          accessToken: await decryptToken(token.access_token),
+          refreshToken: token.refresh_token ? await decryptToken(token.refresh_token) : undefined,
           tokenExpiresAt: token.expires_at,
           content,
           linkUrl,
-          mediaUrl,
+          mediaUrl: effectiveMediaUrl,
           mediaType,
           mediaMeta,
           mediaBlob,
