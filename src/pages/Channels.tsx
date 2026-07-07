@@ -49,7 +49,7 @@ const platformTooltips: Record<string, string> = {
   facebook: "Requires admin access to a Facebook Page. Personal profiles cannot be connected via API.",
   linkedin: "Connect your personal profile or a Company Page you manage via LinkedIn OAuth.",
   x: "Works with personal and business X accounts. Authorizes posting on your behalf.",
-  tiktok: "Connect your TikTok account. Note: Videos may need to be finalized in the TikTok app.",
+  tiktok: "Direct posting is supported. Until your TikTok app passes the Content Posting audit, published videos stay private (SELF_ONLY) — visible only to you in the TikTok app.",
   threads: "Requires Threads account linked to Instagram. Uses Meta's Threads API via OAuth.",
   bluesky: "Uses App Passwords (not OAuth). Create one at bsky.app/settings/app-passwords.",
 };
