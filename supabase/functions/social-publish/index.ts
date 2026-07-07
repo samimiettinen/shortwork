@@ -447,7 +447,7 @@ Deno.serve(async (req) => {
           tokenExpiresAt: token.expires_at,
           content,
           linkUrl,
-          mediaUrl,
+          mediaUrl: effectiveMediaUrl,
           mediaType,
           mediaMeta,
           mediaBlob,
