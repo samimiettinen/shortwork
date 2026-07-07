@@ -124,6 +124,50 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
     }
   };
 
+  const handleReconnect = async (platform: string, accountId: string) => {
+    // Bluesky uses app-password credentials, not OAuth — send user to Channels
+    if (platform === 'bluesky') {
+      navigate('/channels');
+      return;
+    }
+
+    setReconnecting(accountId);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const response = await supabase.functions.invoke('social-auth/connect/' + platform, {
+        body: { userId: user.id, workspaceId, returnUrl: '/compose' },
+      });
+
+      if (response.error) throw response.error;
+
+      const authUrl = response.data?.authUrl;
+      if (!authUrl) throw new Error(response.data?.message || 'Could not start reconnect');
+
+      const isInIframe = window.self !== window.top;
+      if (isInIframe) {
+        // Open in a new tab from a user-initiated click to bypass iframe/OAuth blockers
+        const win = window.open(authUrl, '_blank', 'noopener');
+        if (!win) {
+          toast({
+            title: 'Popup blocked',
+            description: 'Allow popups or open Channels to reconnect.',
+            variant: 'destructive',
+          });
+        } else {
+          toast({ title: 'Reconnecting…', description: `Complete sign-in in the new tab, then retry publish.` });
+        }
+      } else {
+        window.location.href = authUrl;
+      }
+    } catch (error) {
+      handleError(error);
+    } finally {
+      setReconnecting(null);
+    }
+  };
+
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
