@@ -277,12 +277,13 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
 
   const removeMedia = async () => {
     if (uploadedMedia) {
-      // Extract file path from URL
+      // Extract file path from URL (strip signed-URL query string)
       const urlParts = uploadedMedia.url.split('/social-media/');
       if (urlParts[1]) {
+        const path = urlParts[1].split('?')[0];
         await supabase.storage
           .from('social-media')
-          .remove([urlParts[1]]);
+          .remove([path]);
       }
     }
     setUploadedMedia(null);
