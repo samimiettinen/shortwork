@@ -51,6 +51,7 @@ const App = () => (
             <Route path="/accept-invite" element={<AcceptInvite />} />
             <Route path="/settings" element={<WorkspaceSettings />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/platforms" element={<Platforms />} />
             <Route path="/drafts" element={<Dashboard />} />
             <Route path="/history" element={<Dashboard />} />
             <Route path="/privacy-policy" element={<PrivacyPolicy />} />
