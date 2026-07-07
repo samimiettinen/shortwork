@@ -1,13 +1,16 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { Resend } from "https://esm.sh/resend@2.0.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getCorsHeaders } from "../_shared/cors.ts";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Prefer a configured production sender (verified domain in Resend). Falls
+// back to the resend.dev sandbox address only if no INVITATION_FROM_EMAIL is
+// provided, so production deployments should always set this env var.
+const INVITATION_FROM_EMAIL =
+  Deno.env.get("INVITATION_FROM_EMAIL") ||
+  "Workspace Invitations <onboarding@resend.dev>";
 
 interface InvitationRequest {
   email: string;
