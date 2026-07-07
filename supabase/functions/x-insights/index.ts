@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { ensureFreshToken } from "../_shared/publishers.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,65 +12,57 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
+    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const { accountId } = await req.json();
-
     if (!accountId) {
       return new Response(JSON.stringify({ error: 'Missing accountId' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Get the OAuth token for this account
-    const { data: tokenData, error: tokenError } = await supabase
+    const { data: tokenData } = await supabase
       .from('oauth_tokens')
-      .select('access_token')
+      .select('access_token, refresh_token, expires_at, social_account_id')
       .eq('social_account_id', accountId)
       .maybeSingle();
 
-    if (tokenError || !tokenData) {
-      console.error('Token fetch error:', tokenError);
+    if (!tokenData) {
       return new Response(JSON.stringify({ error: 'Account not found or not connected' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const accessToken = tokenData.access_token;
+    // Refresh X access token if it's within 5 min of expiring (X access = 2h)
+    const fresh = await ensureFreshToken('x', {
+      accountId: '', socialAccountId: accountId, content: '',
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token || undefined,
+      tokenExpiresAt: tokenData.expires_at,
+    }, supabase);
 
-    // Get user info
-    console.log('Fetching X user info...');
+    if (fresh.needsReconnect) {
+      return new Response(JSON.stringify({ error: fresh.error, needsReconnect: true }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const accessToken = fresh.accessToken;
+
     const userUrl = 'https://api.twitter.com/2/users/me?user.fields=public_metrics,profile_image_url,description,created_at';
-    const userResponse = await fetch(userUrl, {
-      headers: { 'Authorization': `Bearer ${accessToken}` },
-    });
-    
+    const userResponse = await fetch(userUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
     const userData = await userResponse.json();
-    
+
     if (userData.errors) {
       console.error('X API error:', userData.errors);
-      return new Response(JSON.stringify({ 
-        error: userData.errors[0]?.message || 'Failed to fetch user info',
-      }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      return new Response(JSON.stringify({ error: userData.errors[0]?.message || 'Failed to fetch user info' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     const user = userData.data;
     const publicMetrics = user.public_metrics || {};
 
-    // Get recent tweets
-    console.log('Fetching recent tweets...');
     const tweetsUrl = `https://api.twitter.com/2/users/${user.id}/tweets?max_results=10&tweet.fields=public_metrics,created_at`;
-    const tweetsResponse = await fetch(tweetsUrl, {
-      headers: { 'Authorization': `Bearer ${accessToken}` },
-    });
-    
+    const tweetsResponse = await fetch(tweetsUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
     const tweetsData = await tweetsResponse.json();
 
     const recentTweets = (tweetsData.data || []).map((tweet: any) => ({
@@ -83,7 +76,7 @@ Deno.serve(async (req) => {
       quotes: tweet.public_metrics?.quote_count || 0,
     }));
 
-    const insights = {
+    return new Response(JSON.stringify({
       profile: {
         id: user.id,
         name: user.name,
@@ -99,19 +92,12 @@ Deno.serve(async (req) => {
       },
       recentTweets,
       fetchedAt: new Date().toISOString(),
-    };
-
-    return new Response(JSON.stringify(insights), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error: unknown) {
     console.error('X insights error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error';
-    return new Response(JSON.stringify({ error: errorMessage }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : 'Internal server error' }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });

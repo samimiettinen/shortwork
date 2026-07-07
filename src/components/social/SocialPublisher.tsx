@@ -40,6 +40,7 @@ interface PublishResult {
   postId?: string;
   postUrl?: string;
   error?: string;
+  needsReconnect?: boolean;
 }
 
 interface UploadedMedia {
@@ -91,21 +92,14 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
   const [results, setResults] = useState<PublishResult[] | null>(null);
   const [videoPreviewOpen, setVideoPreviewOpen] = useState(false);
 
-  // Helper to check if error requires reconnection
-  const needsReconnection = (error?: string) => {
+  // Backend now returns a needsReconnect flag; fall back to keyword sniff only
+  // for older responses that lack it.
+  const needsReconnection = (r: PublishResult) => {
+    if (r.needsReconnect) return true;
+    const error = r.error;
     if (!error) return false;
-    const reconnectKeywords = [
-      'reconnect',
-      'expired',
-      'invalid authentication',
-      'authentication credentials',
-      'OAuth',
-      'access token',
-      'refresh token',
-    ];
-    return reconnectKeywords.some(keyword => 
-      error.toLowerCase().includes(keyword.toLowerCase())
-    );
+    const reconnectKeywords = ['reconnect', 'expired', 'invalid authentication', 'authentication credentials', 'access token', 'refresh token'];
+    return reconnectKeywords.some(k => error.toLowerCase().includes(k));
   };
 
   useEffect(() => {
@@ -703,7 +697,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
                       <div>
                         <strong className="capitalize">{r.platform}:</strong> {r.error}
                       </div>
-                      {needsReconnection(r.error) && (
+                      {needsReconnection(r) && (
                         <Button
                           variant="outline"
                           size="sm"

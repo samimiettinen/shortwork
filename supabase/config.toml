@@ -6,6 +6,9 @@ verify_jwt = true
 [functions.social-auth]
 verify_jwt = false
 
+[functions.publish-scheduled]
+verify_jwt = false
+
 [functions.social-publish]
 verify_jwt = true
 
