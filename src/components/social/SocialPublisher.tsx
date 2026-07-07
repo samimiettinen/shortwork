@@ -747,10 +747,14 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
                           variant="outline"
                           size="sm"
                           className="shrink-0 h-7 text-xs bg-background hover:bg-muted"
-                          onClick={() => navigate('/channels')}
+                          onClick={() => handleReconnect(r.platform, r.accountId)}
+                          disabled={reconnecting === r.accountId}
                         >
-                          <RefreshCw className="w-3 h-3 mr-1" />
-                          Reconnect
+                          {reconnecting === r.accountId ? (
+                            <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Opening…</>
+                          ) : (
+                            <><RefreshCw className="w-3 h-3 mr-1" /> Reconnect</>
+                          )}
                         </Button>
                       )}
                     </div>
