@@ -90,6 +90,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [results, setResults] = useState<PublishResult[] | null>(null);
+  const [reconnecting, setReconnecting] = useState<string | null>(null);
   const [videoPreviewOpen, setVideoPreviewOpen] = useState(false);
 
   // Backend now returns a needsReconnect flag; fall back to keyword sniff only
