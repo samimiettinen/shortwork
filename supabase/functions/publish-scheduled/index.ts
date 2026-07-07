@@ -10,6 +10,7 @@ import {
   fetchMediaBlob,
   PublishOptions,
   MediaMeta,
+  decryptToken,
 } from "../_shared/publishers.ts";
 
 const BATCH_SIZE = 25;
