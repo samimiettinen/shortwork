@@ -40,6 +40,7 @@ interface PublishResult {
   postId?: string;
   postUrl?: string;
   error?: string;
+  needsReconnect?: boolean;
 }
 
 interface UploadedMedia {
@@ -49,6 +50,8 @@ interface UploadedMedia {
   size: number;
   thumbnailUrl?: string;
   duration?: number;
+  width?: number;
+  height?: number;
 }
 
 const platformIcons: Record<string, React.ReactNode> = {
@@ -87,23 +90,17 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [results, setResults] = useState<PublishResult[] | null>(null);
+  const [reconnecting, setReconnecting] = useState<string | null>(null);
   const [videoPreviewOpen, setVideoPreviewOpen] = useState(false);
 
-  // Helper to check if error requires reconnection
-  const needsReconnection = (error?: string) => {
+  // Backend now returns a needsReconnect flag; fall back to keyword sniff only
+  // for older responses that lack it.
+  const needsReconnection = (r: PublishResult) => {
+    if (r.needsReconnect) return true;
+    const error = r.error;
     if (!error) return false;
-    const reconnectKeywords = [
-      'reconnect',
-      'expired',
-      'invalid authentication',
-      'authentication credentials',
-      'OAuth',
-      'access token',
-      'refresh token',
-    ];
-    return reconnectKeywords.some(keyword => 
-      error.toLowerCase().includes(keyword.toLowerCase())
-    );
+    const reconnectKeywords = ['reconnect', 'expired', 'invalid authentication', 'authentication credentials', 'access token', 'refresh token'];
+    return reconnectKeywords.some(k => error.toLowerCase().includes(k));
   };
 
   useEffect(() => {
@@ -124,6 +121,50 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
       handleError(error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReconnect = async (platform: string, accountId: string) => {
+    // Bluesky uses app-password credentials, not OAuth — send user to Channels
+    if (platform === 'bluesky') {
+      navigate('/channels');
+      return;
+    }
+
+    setReconnecting(accountId);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const response = await supabase.functions.invoke('social-auth/connect/' + platform, {
+        body: { userId: user.id, workspaceId, returnUrl: '/compose' },
+      });
+
+      if (response.error) throw response.error;
+
+      const authUrl = response.data?.authUrl;
+      if (!authUrl) throw new Error(response.data?.message || 'Could not start reconnect');
+
+      const isInIframe = window.self !== window.top;
+      if (isInIframe) {
+        // Open in a new tab from a user-initiated click to bypass iframe/OAuth blockers
+        const win = window.open(authUrl, '_blank', 'noopener');
+        if (!win) {
+          toast({
+            title: 'Popup blocked',
+            description: 'Allow popups or open Channels to reconnect.',
+            variant: 'destructive',
+          });
+        } else {
+          toast({ title: 'Reconnecting…', description: `Complete sign-in in the new tab, then retry publish.` });
+        }
+      } else {
+        window.location.href = authUrl;
+      }
+    } catch (error) {
+      handleError(error);
+    } finally {
+      setReconnecting(null);
     }
   };
 
@@ -161,13 +202,17 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
       // Generate thumbnail for video files
       let thumbnailUrl: string | undefined;
       let duration: number | undefined;
-      
+      let width: number | undefined;
+      let height: number | undefined;
+
       if (isVideo) {
         try {
           setUploadProgress(5);
           const thumbData = await generateVideoThumbnail(file);
           thumbnailUrl = thumbData.thumbnailUrl;
           duration = thumbData.duration;
+          width = thumbData.width;
+          height = thumbData.height;
           setUploadProgress(15);
         } catch (thumbError) {
           console.warn('Could not generate thumbnail:', thumbError);
@@ -193,22 +238,27 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
 
       if (error) throw error;
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
+      // Bucket is private — issue a signed URL for preview and publishing.
+      // Backend re-signs before dispatching to external providers.
+      const { data: signed, error: signErr } = await supabase.storage
         .from('social-media')
-        .getPublicUrl(data.path);
+        .createSignedUrl(data.path, 60 * 60 * 24);
+      if (signErr || !signed?.signedUrl) throw signErr || new Error('Could not sign upload URL');
+      const previewUrl = signed.signedUrl;
 
       setUploadProgress(100);
-      
+
       setUploadedMedia({
-        url: publicUrl,
+        url: previewUrl,
         type: isVideo ? 'video' : 'image',
         name: file.name,
         size: file.size,
         thumbnailUrl,
         duration,
+        width,
+        height,
       });
-      setMediaUrl(publicUrl);
+      setMediaUrl(previewUrl);
 
       toast({
         title: "Upload complete",
@@ -227,12 +277,13 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
 
   const removeMedia = async () => {
     if (uploadedMedia) {
-      // Extract file path from URL
+      // Extract file path from URL (strip signed-URL query string)
       const urlParts = uploadedMedia.url.split('/social-media/');
       if (urlParts[1]) {
+        const path = urlParts[1].split('?')[0];
         await supabase.storage
           .from('social-media')
-          .remove([urlParts[1]]);
+          .remove([path]);
       }
     }
     setUploadedMedia(null);
@@ -251,7 +302,7 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const generateVideoThumbnail = (file: File): Promise<{ thumbnailUrl: string; duration: number }> => {
+  const generateVideoThumbnail = (file: File): Promise<{ thumbnailUrl: string; duration: number; width: number; height: number }> => {
     return new Promise((resolve, reject) => {
       const video = document.createElement('video');
       const canvas = document.createElement('canvas');
@@ -273,13 +324,15 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
         
         const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.8);
         const duration = video.duration;
-        
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+
         // Cleanup
         URL.revokeObjectURL(video.src);
         video.remove();
         canvas.remove();
-        
-        resolve({ thumbnailUrl, duration });
+
+        resolve({ thumbnailUrl, duration, width, height });
       };
       
       video.onerror = () => {
@@ -362,6 +415,13 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
           mediaUrl: uploadedMedia?.url || mediaUrl || undefined,
           // Pass the media type for platform-specific validation
           mediaType: uploadedMedia?.type || undefined,
+          // Video dimensions/duration let the backend pick Reels vs regular
+          // video and validate per-platform duration limits
+          mediaMeta: uploadedMedia ? {
+            width: uploadedMedia.width,
+            height: uploadedMedia.height,
+            durationSeconds: uploadedMedia.duration,
+          } : undefined,
           targetAccountIds: selectedAccounts,
         },
       });
@@ -686,15 +746,19 @@ export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
                       <div>
                         <strong className="capitalize">{r.platform}:</strong> {r.error}
                       </div>
-                      {needsReconnection(r.error) && (
+                      {needsReconnection(r) && (
                         <Button
                           variant="outline"
                           size="sm"
                           className="shrink-0 h-7 text-xs bg-background hover:bg-muted"
-                          onClick={() => navigate('/channels')}
+                          onClick={() => handleReconnect(r.platform, r.accountId)}
+                          disabled={reconnecting === r.accountId}
                         >
-                          <RefreshCw className="w-3 h-3 mr-1" />
-                          Reconnect
+                          {reconnecting === r.accountId ? (
+                            <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Opening…</>
+                          ) : (
+                            <><RefreshCw className="w-3 h-3 mr-1" /> Reconnect</>
+                          )}
                         </Button>
                       )}
                     </div>
