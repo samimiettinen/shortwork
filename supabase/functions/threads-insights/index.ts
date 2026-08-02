@@ -1,9 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { ensureFreshToken } from "../_shared/publishers.ts";
+import { decryptToken } from "../_shared/token-crypto.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+
 
 interface ThreadsInsight {
   name: string;
@@ -15,6 +15,7 @@ interface ThreadsInsight {
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req.headers.get('Origin'));
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -36,7 +37,7 @@ Deno.serve(async (req) => {
     // Get the OAuth token for this account
     const { data: tokenData, error: tokenError } = await supabase
       .from('oauth_tokens')
-      .select('access_token')
+      .select('access_token, refresh_token, expires_at')
       .eq('social_account_id', accountId)
       .maybeSingle();
 
@@ -48,7 +49,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    const accessToken = tokenData.access_token;
+    // Threads long-lived tokens can be programmatically refreshed while valid.
+    const fresh = await ensureFreshToken('threads', {
+      accountId: '', socialAccountId: accountId, content: '',
+      accessToken: await decryptToken(tokenData.access_token),
+      refreshToken: tokenData.refresh_token ? await decryptToken(tokenData.refresh_token) : undefined,
+      tokenExpiresAt: tokenData.expires_at,
+    }, supabase);
+    if (fresh.needsReconnect) {
+      return new Response(JSON.stringify({ error: fresh.error, needsReconnect: true }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const accessToken = fresh.accessToken;
 
     // Get user insights
     const userInsightsUrl = `https://graph.threads.net/v1.0/me/threads_insights?metric=views,likes,replies,reposts,quotes,followers_count&access_token=${accessToken}`;
