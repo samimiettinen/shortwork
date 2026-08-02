@@ -85,7 +85,7 @@ const Index = () => {
       <footer className="border-t border-border py-8">
         <div className="container mx-auto px-4">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-muted-foreground">&copy; 2024 ShortWork. Built with Lovable.</p>
+            <p className="text-muted-foreground">2026 ShortWork. Built with Lovable and Claude Code by Sami Miettinen</p>
             <div className="flex items-center gap-6">
               <Link to="/privacy-policy" className="text-muted-foreground hover:text-foreground transition-colors text-sm">
                 Privacy Policy
