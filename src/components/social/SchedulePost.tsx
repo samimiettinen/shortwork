@@ -64,9 +64,15 @@ export function SchedulePost({ workspaceId }: { workspaceId: string }) {
   const probeVideo = (file: File) => new Promise<{width:number;height:number;duration:number}>((resolve, reject) => {
     const v = document.createElement('video');
     v.preload = 'metadata';
-    v.onloadedmetadata = () => resolve({ width: v.videoWidth, height: v.videoHeight, duration: v.duration });
-    v.onerror = () => reject(new Error('video probe failed'));
-    v.src = URL.createObjectURL(file);
+    v.onloadedmetadata = () => {
+      v.srcObject = null;
+      resolve({ width: v.videoWidth, height: v.videoHeight, duration: v.duration });
+    };
+    v.onerror = () => {
+      v.srcObject = null;
+      reject(new Error('video probe failed'));
+    };
+    v.srcObject = file;
   });
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
