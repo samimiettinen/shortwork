@@ -1,4 +1,10 @@
-# Welcome to your Lovable project
+# ShortWork — short video publishing platform
+
+Publish short videos to YouTube, TikTok, Instagram Reels, Facebook Reels,
+LinkedIn, X, Threads and Bluesky from one place. Built on React + Supabase
+(edge functions handle OAuth and publishing server-side).
+
+**Platform credentials & setup:** see [docs/PLATFORM_SETUP.md](docs/PLATFORM_SETUP.md).
 
 ## Project info
 
