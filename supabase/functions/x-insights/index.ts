@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { authorizeAccountAccess } from "../_shared/insights-auth.ts";
 import { ensureFreshToken } from "../_shared/publishers.ts";
 import { decryptToken } from "../_shared/token-crypto.ts";
 
@@ -17,6 +18,14 @@ Deno.serve(async (req) => {
     if (!accountId) {
       return new Response(JSON.stringify({ error: 'Missing accountId' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const authz = await authorizeAccountAccess(req, supabase, accountId);
+    if (!authz.ok) {
+      return new Response(JSON.stringify({ error: authz.error }), {
+        status: authz.status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
