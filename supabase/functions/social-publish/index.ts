@@ -99,8 +99,14 @@ function validateUrl(url: string | undefined): { valid: boolean; sanitized?: str
       hostname.startsWith('127.') ||
       hostname.startsWith('192.168.') ||
       hostname.startsWith('10.') ||
-      hostname.startsWith('172.16.') ||
-      hostname === '0.0.0.0'
+      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
+      hostname.startsWith('169.254.') ||
+      hostname === '0.0.0.0' ||
+      hostname === '[::1]' || hostname === '::1' ||
+      hostname === '[::]' || hostname === '::' ||
+      /^\[?(f[cd][0-9a-f]{2}:|fe80:)/i.test(hostname) ||
+      hostname.endsWith('.internal') ||
+      hostname.endsWith('.local')
     ) {
       return { valid: false, error: 'Internal URLs are not allowed' };
     }

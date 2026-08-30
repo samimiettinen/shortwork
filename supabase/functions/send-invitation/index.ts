@@ -181,10 +181,10 @@ const handler = async (req: Request): Promise<Response> => {
               Hi there! 👋
             </p>
             <p style="font-size: 16px; margin-bottom: 20px;">
-              <strong>${inviterName}</strong> has invited you to join <strong>${workspace.name}</strong> as a <strong>${role}</strong>.
+              <strong>${escapeHtml(inviterName)}</strong> has invited you to join <strong>${escapeHtml(workspace.name)}</strong> as a <strong>${escapeHtml(role)}</strong>.
             </p>
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${inviteLink}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">
+              <a href="${escapeHtml(inviteLink)}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">
                 Accept Invitation
               </a>
             </div>
@@ -194,7 +194,7 @@ const handler = async (req: Request): Promise<Response> => {
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="font-size: 12px; color: #999; text-align: center;">
               If the button doesn't work, copy and paste this link into your browser:<br>
-              <a href="${inviteLink}" style="color: #667eea; word-break: break-all;">${inviteLink}</a>
+              <a href="${escapeHtml(inviteLink)}" style="color: #667eea; word-break: break-all;">${escapeHtml(inviteLink)}</a>
             </p>
           </div>
         </body>
