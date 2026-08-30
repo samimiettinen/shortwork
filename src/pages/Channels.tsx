@@ -19,6 +19,7 @@ import {
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 import { ChannelSetupWizard } from "@/components/channels/ChannelSetupWizard";
 import { ConnectionTroubleshooting } from "@/components/channels/ConnectionTroubleshooting";
+import { SocialConnectCards } from "@/components/social/SocialConnectCards";
 
 interface SocialAccount {
   id: string;
@@ -72,6 +73,7 @@ const Channels = () => {
     refreshed: number;
   } | null>(null);
   const [pendingAuthUrl, setPendingAuthUrl] = useState<{ url: string; provider: string } | null>(null);
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
 
   useEffect(() => {
     loadAccounts();
@@ -279,6 +281,39 @@ const Channels = () => {
     }
   };
 
+  const verifyAccount = async (accountId: string, platform: ProviderName) => {
+    if (!workspaceId) return;
+    setVerifyingId(accountId);
+    try {
+      const { data, error } = await supabase.functions.invoke("social-verify", {
+        body: { workspaceId, accountId, platform },
+      });
+      if (error) throw error;
+      const result = data?.results?.[0];
+      if (result?.ok) {
+        toast({
+          title: "Lupa toimii",
+          description: result.handle
+            ? `${platform}: ${result.displayName} (${result.handle})`
+            : `${platform}: ${result.displayName || "OK"}`,
+        });
+      } else {
+        toast({
+          title: "Lupatesti epäonnistui",
+          description: result?.error || data?.error || "Tuntematon virhe",
+          variant: "destructive",
+        });
+        if (result?.needsReconnect) {
+          await loadAccounts();
+        }
+      }
+    } catch (error) {
+      handleError(error);
+    } finally {
+      setVerifyingId(null);
+    }
+  };
+
   const disconnectAccount = async (accountId: string, platform: string) => {
     if (!workspaceId) return;
     
@@ -356,13 +391,30 @@ const Channels = () => {
           </div>
         </div>
 
-        {accounts.length === 0 ? (
-          <ChannelSetupWizard
-            onConnect={connectOAuthProvider}
-            onBlueskyConnect={() => setShowBlueskyDialog(true)}
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-1">Julkaisukanavat</h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            YouTube, Meta (Instagram &amp; Facebook) ja TikTok — yhteystila ja OAuth-käynnistys.
+          </p>
+          <SocialConnectCards
+            accounts={accounts}
             connecting={connecting}
-            onCancelConnect={() => setConnecting(null)}
+            verifyingId={verifyingId}
+            onConnect={connectOAuthProvider}
+            onVerify={verifyAccount}
           />
+        </div>
+
+        {accounts.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-4">
+            <p className="text-sm text-muted-foreground">
+              LinkedIn, X, Threads ja Bluesky ovat edelleen tuettuja.
+            </p>
+            <Button variant="outline" onClick={() => setShowWizard(true)}>
+              <Zap className="w-4 h-4 mr-2" />
+              Muut alustat
+            </Button>
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {accounts.map((account) => {

@@ -10,6 +10,8 @@ export interface OAuthState {
   provider: string;
   returnUrl: string;
   codeVerifier?: string;
+  /** Must match the redirect_uri used when the auth URL was built */
+  redirectMode?: "frontend" | "edge";
   iat: number;
 }
 
