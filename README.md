@@ -10,7 +10,7 @@ I coded this first as my final project for Harvard CS50 course. Strong recommend
 
 ## Project info
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+**URL**: https://lovable.dev/projects/5c813f69-b2a5-4e45-9592-246ab9531464
 
 ## How can I edit this code?
 
@@ -18,7 +18,7 @@ There are several ways of editing your application.
 
 **Use Lovable**
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+Simply visit the [Lovable Project](https://lovable.dev/projects/5c813f69-b2a5-4e45-9592-246ab9531464) and start prompting.
 
 Changes made via Lovable will be committed automatically to this repo.
 
@@ -70,7 +70,7 @@ This project is built with:
 
 ## How can I deploy this project?
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+Simply open [Lovable](https://lovable.dev/projects/5c813f69-b2a5-4e45-9592-246ab9531464) and click on Share -> Publish.
 
 ## Can I connect a custom domain to my Lovable project?
 

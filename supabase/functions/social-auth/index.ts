@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, getCorsHeaders } from "../_shared/cors.ts";
 import {
   encodeState,
   decodeState,
@@ -8,69 +8,14 @@ import {
   OAuthState,
 } from "../_shared/oauth-state.ts";
 import { encryptToken } from "../_shared/token-crypto.ts";
-
-const GRAPH_VERSION = 'v25.0';
-
-// Provider configurations
-const PROVIDERS = {
-  youtube: {
-    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
-    tokenUrl: 'https://oauth2.googleapis.com/token',
-    scopes: ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/userinfo.profile'],
-    scopeDelimiter: ' ',
-    clientKeyParam: 'client_id',
-  },
-  facebook: {
-    authUrl: `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`,
-    tokenUrl: `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token`,
-    scopes: ['pages_manage_posts', 'pages_read_engagement', 'pages_show_list', 'publish_video', 'business_management'],
-    scopeDelimiter: ',',
-    clientKeyParam: 'client_id',
-  },
-  instagram: {
-    authUrl: `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`,
-    tokenUrl: `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token`,
-    scopes: ['instagram_basic', 'instagram_content_publish', 'pages_show_list', 'pages_read_engagement', 'business_management'],
-    scopeDelimiter: ',',
-    clientKeyParam: 'client_id',
-  },
-  linkedin: {
-    authUrl: 'https://www.linkedin.com/oauth/v2/authorization',
-    tokenUrl: 'https://www.linkedin.com/oauth/v2/accessToken',
-    scopes: ['openid', 'profile', 'w_member_social'],
-    scopeDelimiter: ' ',
-    clientKeyParam: 'client_id',
-  },
-  x: {
-    authUrl: 'https://x.com/i/oauth2/authorize',
-    tokenUrl: 'https://api.x.com/2/oauth2/token',
-    // media.write is required for video/image upload via the v2 media endpoints
-    scopes: ['tweet.read', 'tweet.write', 'users.read', 'media.write', 'offline.access'],
-    scopeDelimiter: ' ',
-    clientKeyParam: 'client_id',
-  },
-  tiktok: {
-    authUrl: 'https://www.tiktok.com/v2/auth/authorize/',
-    tokenUrl: 'https://open.tiktokapis.com/v2/oauth/token/',
-    scopes: ['user.info.basic', 'video.publish'],
-    // TikTok uses comma-separated scopes and client_key instead of client_id
-    scopeDelimiter: ',',
-    clientKeyParam: 'client_key',
-  },
-  threads: {
-    authUrl: 'https://threads.net/oauth/authorize',
-    tokenUrl: 'https://graph.threads.net/oauth/access_token',
-    scopes: [
-      'threads_basic',
-      'threads_content_publish',
-      'threads_manage_insights',
-      'threads_manage_replies',
-      'threads_read_replies'
-    ],
-    scopeDelimiter: ',',
-    clientKeyParam: 'client_id',
-  },
-};
+import {
+  GRAPH_VERSION,
+  PROVIDERS,
+  getOAuthRedirectUri,
+  isKnownProvider,
+  resolveRedirectMode,
+  type OAuthRedirectMode,
+} from "../_shared/social-providers.ts";
 
 Deno.serve(async (req) => {
   // Handle CORS preflight
@@ -94,6 +39,8 @@ Deno.serve(async (req) => {
       return await handleConnect(req, provider, supabase);
     } else if (action === 'callback') {
       return await handleCallback(req, provider, supabase);
+    } else if (action === 'exchange') {
+      return await handleExchange(req, provider, supabase);
     } else if (action === 'bluesky-auth') {
       return await handleBlueskyAuth(req, supabase);
     } else if (action === 'disconnect') {
@@ -163,17 +110,19 @@ async function handleConnect(req: Request, provider: string, supabase: any) {
     });
   }
 
-  const providerConfig = PROVIDERS[provider as keyof typeof PROVIDERS];
-  if (!providerConfig) {
+  if (!isKnownProvider(provider)) {
     return new Response(JSON.stringify({ error: `Unsupported provider: ${provider}` }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
+  const providerConfig = PROVIDERS[provider];
+
   // Get environment variables for this provider
   const clientId = Deno.env.get(`${provider.toUpperCase()}_CLIENT_ID`);
-  const redirectUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/social-auth/callback/${provider}`;
+  const redirectMode = resolveRedirectMode();
+  const redirectUri = getOAuthRedirectUri(provider, redirectMode);
 
   if (!clientId) {
     return new Response(JSON.stringify({
@@ -185,7 +134,7 @@ async function handleConnect(req: Request, provider: string, supabase: any) {
     });
   }
 
-  // PKCE verifier for providers that require it (X)
+  // PKCE verifier for X and TikTok (Content Posting API v2)
   let codeVerifier: string | undefined;
 
   const params = new URLSearchParams({
@@ -203,7 +152,7 @@ async function handleConnect(req: Request, provider: string, supabase: any) {
     params.set('prompt', 'consent');
   }
 
-  if (provider === 'x') {
+  if (providerConfig.usesPkce) {
     codeVerifier = generateCodeVerifier();
     params.set('code_challenge', await codeChallengeS256(codeVerifier));
     params.set('code_challenge_method', 'S256');
@@ -216,6 +165,7 @@ async function handleConnect(req: Request, provider: string, supabase: any) {
     provider,
     returnUrl: returnUrl || '/channels',
     codeVerifier,
+    redirectMode,
   });
   params.set('state', stateToken);
 
@@ -248,10 +198,15 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
     return new Response('Missing or invalid code/state', { status: 400, headers: corsHeaders });
   }
 
-  const providerConfig = PROVIDERS[provider as keyof typeof PROVIDERS];
+  if (!isKnownProvider(provider)) {
+    return new Response('Unsupported provider', { status: 400, headers: corsHeaders });
+  }
+
+  const providerConfig = PROVIDERS[provider];
   const clientId = Deno.env.get(`${provider.toUpperCase()}_CLIENT_ID`);
   const clientSecret = Deno.env.get(`${provider.toUpperCase()}_CLIENT_SECRET`);
-  const redirectUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/social-auth/callback/${provider}`;
+  const redirectMode: OAuthRedirectMode = state.redirectMode || 'edge';
+  const redirectUri = getOAuthRedirectUri(provider, redirectMode);
 
   console.log('Token exchange config:', { provider, hasClientId: !!clientId, hasClientSecret: !!clientSecret });
 
@@ -281,6 +236,7 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
       if (state.codeVerifier) tokenParams.set('code_verifier', state.codeVerifier);
     } else {
       tokenParams.set('client_secret', clientSecret);
+      if (state.codeVerifier) tokenParams.set('code_verifier', state.codeVerifier);
     }
 
     const tokenResponse = await fetch(providerConfig.tokenUrl, {
@@ -338,6 +294,58 @@ async function handleCallback(req: Request, provider: string, supabase: any) {
     console.error('Callback error:', err);
     return Response.redirect(`${appUrl}${state.returnUrl}?error=callback_failed`, 302);
   }
+}
+
+/** SPA callback (`/api/auth/callback/:provider`) posts the provider code here. */
+async function handleExchange(req: Request, provider: string, supabase: any) {
+  const cors = getCorsHeaders(req.headers.get('Origin'));
+  const appUrl = Deno.env.get('APP_URL') || 'https://shortwork.lovable.app';
+
+  let body: { code?: string; state?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+      status: 400,
+      headers: { ...cors, 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (!body.code || !body.state) {
+    return new Response(JSON.stringify({ error: 'Missing code or state' }), {
+      status: 400,
+      headers: { ...cors, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const fakeUrl = new URL(req.url);
+  fakeUrl.searchParams.set('code', body.code);
+  fakeUrl.searchParams.set('state', body.state);
+  const forwarded = new Request(fakeUrl.toString(), { method: 'GET', headers: req.headers });
+  const result = await handleCallback(forwarded, provider, supabase);
+
+  const location = result.headers.get('Location');
+  if (location) {
+    const failed = location.includes('error=');
+    return new Response(JSON.stringify({
+      success: !failed,
+      redirectTo: location,
+      error: failed ? new URL(location).searchParams.get('error') : undefined,
+    }), {
+      status: failed ? 400 : 200,
+      headers: { ...cors, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const text = await result.text();
+  return new Response(JSON.stringify({
+    success: false,
+    error: text || 'callback_failed',
+    redirectTo: `${appUrl}/channels?error=callback_failed`,
+  }), {
+    status: result.status || 400,
+    headers: { ...cors, 'Content-Type': 'application/json' },
+  });
 }
 
 interface AccountData {

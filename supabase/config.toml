@@ -32,3 +32,6 @@ verify_jwt = true
 
 [functions.admin-delete]
 verify_jwt = true
+
+[functions.social-verify]
+verify_jwt = true

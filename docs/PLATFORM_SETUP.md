@@ -10,6 +10,8 @@ Edge Function secrets (`Project Settings → Edge Functions → Secrets`).
 |---|---|
 | `APP_URL` | Where OAuth callbacks redirect back to (your deployed app URL) |
 | `OAUTH_STATE_SECRET` | (optional) HMAC key for signing OAuth state; falls back to the service role key |
+| `TOKEN_ENCRYPTION_KEY` | AES-GCM key for `oauth_tokens` (hex 64 chars or any string ≥ 32 chars). Without it tokens are stored as plaintext. |
+| `OAUTH_FRONTEND_CALLBACK` | Set to `true` to use SPA routes `/api/auth/callback/<provider>` as the OAuth redirect URI. Default (`false` or unset) keeps the existing Supabase function callback. |
 | `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` | Google Cloud OAuth client (YouTube Data API v3 enabled) |
 | `FACEBOOK_CLIENT_ID` / `FACEBOOK_CLIENT_SECRET` | Meta app (Facebook Login product) |
 | `INSTAGRAM_CLIENT_ID` / `INSTAGRAM_CLIENT_SECRET` | Same Meta app credentials as Facebook (Facebook Login variant) |
@@ -18,7 +20,7 @@ Edge Function secrets (`Project Settings → Edge Functions → Secrets`).
 | `TIKTOK_CLIENT_ID` / `TIKTOK_CLIENT_SECRET` | TikTok developer app **client_key / client_secret** (env names keep the `_CLIENT_ID` convention, but the value is TikTok's *client key*) |
 | `THREADS_CLIENT_ID` / `THREADS_CLIENT_SECRET` | Meta "Threads API" app credentials |
 
-Redirect URI to register with **every** provider:
+Redirect URI to register with **every** provider (default, already in use):
 
 ```
 https://<your-project-ref>.supabase.co/functions/v1/social-auth/callback/<provider>
@@ -26,11 +28,25 @@ https://<your-project-ref>.supabase.co/functions/v1/social-auth/callback/<provid
 
 e.g. `https://ehoawfmrfkcciqlzknvq.supabase.co/functions/v1/social-auth/callback/tiktok`
 
+Optional SPA aliases (only if `OAUTH_FRONTEND_CALLBACK=true` — register these **instead** of the function URL, and keep `APP_URL` in sync):
+
+```
+https://<APP_URL>/api/auth/callback/youtube
+https://<APP_URL>/api/auth/callback/facebook
+https://<APP_URL>/api/auth/callback/instagram
+https://<APP_URL>/api/auth/callback/tiktok
+```
+
+The SPA page forwards the authorization code to `social-auth/exchange/<provider>`. Client secrets never leave the edge function.
+
+Permission smoke-test: authenticated `POST` to `social-verify` with `{ workspaceId, accountId }` fetches the channel/page/user name after a token refresh.
+
 ## Per-platform requirements (verified July 2026)
 
 ### YouTube — works out of the box
 - Google Cloud project with **YouTube Data API v3** enabled.
 - Scopes: `youtube.upload`, `youtube.readonly`, `userinfo.profile`.
+- Auth URL uses `access_type=offline` and `prompt=consent` so Google always returns a refresh token. `ensureFreshToken` refreshes before each resumable upload.
 - **Quota:** each upload costs 1600 units of the 10,000/day default → ~6
   uploads/day. Request a quota extension for more.
 - If the OAuth consent screen is in *Testing* mode, refresh tokens expire after
@@ -41,8 +57,10 @@ e.g. `https://ehoawfmrfkcciqlzknvq.supabase.co/functions/v1/social-auth/callback
 ### TikTok — Direct Post (Content Posting API)
 - TikTok for Developers app with **Login Kit** + **Content Posting API**
   products, Direct Post configuration.
-- Scopes: `user.info.basic`, `video.publish` (comma-separated; TikTok uses
-  `client_key`, which the code handles).
+- Scopes: `user.info.basic`, `video.upload`, `video.publish` (comma-separated;
+  TikTok uses `client_key`, which the code handles). Connect uses OAuth 2.0
+  PKCE (`S256`). **Existing TikTok connections must be reconnected** to pick
+  up `video.upload` and PKCE.
 - **Until the app passes TikTok's Content Posting audit, every post is forced
   to private (SELF_ONLY) visibility** and max 5 users/24h may post. Apply for
   the audit in the developer portal — it requires screen recordings of the
@@ -58,7 +76,8 @@ e.g. `https://ehoawfmrfkcciqlzknvq.supabase.co/functions/v1/social-auth/callback
 ### Instagram — Reels via Facebook Login
 - Requires an **Instagram professional account linked to a Facebook Page**.
 - Meta app with Facebook Login; scopes `instagram_basic`,
-  `instagram_content_publish`, `pages_show_list`, `pages_read_engagement`
+  `instagram_content_publish`, `pages_show_list`, `pages_read_engagement`,
+  `pages_manage_posts`
   (+ `business_management` if the assets live in Business Manager).
 - **App Review (Advanced Access) + Business Verification** are required before
   users without a role on the app can connect. For your own account, adding
