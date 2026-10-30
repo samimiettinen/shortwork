@@ -53,7 +53,7 @@ export const AppLayout = ({ children }: { children: ReactNode }) => {
           <div className="w-9 h-9 rounded-lg bg-gradient-primary flex items-center justify-center">
             <Zap className="w-5 h-5 text-primary-foreground" />
           </div>
-          <span className="font-display font-bold text-lg">ShortsPublish</span>
+          <span className="font-display font-bold text-lg">ShortWork</span>
           <button className="lg:hidden ml-auto" onClick={() => setSidebarOpen(false)}><X className="w-5 h-5" /></button>
         </div>
 

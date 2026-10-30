@@ -373,7 +373,7 @@ async function saveAccountWithToken(
       handle: accountData.handle,
       avatar_url: accountData.avatarUrl,
       account_type: accountData.accountType,
-      autopublish_capable: true,
+      autopublish_capable: platform !== 'tiktok',
       status: 'connected',
       last_connected_at: new Date().toISOString(),
     }, {

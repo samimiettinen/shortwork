@@ -1,27 +1,28 @@
+import { lazy, Suspense } from 'react';
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import Index from "./pages/Index";
-import Auth from "./pages/Auth";
-import Dashboard from "./pages/Dashboard";
-import Onboarding from "./pages/Onboarding";
-import Channels from "./pages/Channels";
-import Compose from "./pages/Compose";
-import Queue from "./pages/Queue";
-import Admin from "./pages/Admin";
-import TeamMembers from "./pages/TeamMembers";
-import AcceptInvite from "./pages/AcceptInvite";
-import WorkspaceSettings from "./pages/WorkspaceSettings";
-import Analytics from "./pages/Analytics";
-import Platforms from "./pages/Platforms";
-import NotFound from "./pages/NotFound";
-import PrivacyPolicy from "./pages/PrivacyPolicy";
-import TermsOfService from "./pages/TermsOfService";
-import DataDeletion from "./pages/DataDeletion";
-import OAuthCallback from "./pages/OAuthCallback";
+const Index = lazy(() => import("./pages/Index"));
+const Auth = lazy(() => import("./pages/Auth"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Onboarding = lazy(() => import("./pages/Onboarding"));
+const Channels = lazy(() => import("./pages/Channels"));
+const Compose = lazy(() => import("./pages/Compose"));
+const Queue = lazy(() => import("./pages/Queue"));
+const Admin = lazy(() => import("./pages/Admin"));
+const TeamMembers = lazy(() => import("./pages/TeamMembers"));
+const AcceptInvite = lazy(() => import("./pages/AcceptInvite"));
+const WorkspaceSettings = lazy(() => import("./pages/WorkspaceSettings"));
+const Analytics = lazy(() => import("./pages/Analytics"));
+const Platforms = lazy(() => import("./pages/Platforms"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
+const TermsOfService = lazy(() => import("./pages/TermsOfService"));
+const DataDeletion = lazy(() => import("./pages/DataDeletion"));
+const OAuthCallback = lazy(() => import("./pages/OAuthCallback"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +40,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <Suspense fallback={<div role="status" className="p-8 text-center">Loading…</div>}>
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<Auth />} />
@@ -61,6 +63,7 @@ const App = () => (
             <Route path="/api/auth/callback/:provider" element={<OAuthCallback />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>

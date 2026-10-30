@@ -124,7 +124,7 @@ export const PLATFORM_CONFIG: Record<ProviderName, {
     supportsVideo: true,
     supportsLinks: true,
     oauthRequired: true,
-    setupInstructions: 'Connect your LinkedIn profile or Company Page'
+    setupInstructions: 'Connect your LinkedIn personal profile'
   },
   x: {
     displayName: 'X (Twitter)',
@@ -146,7 +146,7 @@ export const PLATFORM_CONFIG: Record<ProviderName, {
     supportsVideo: true,
     supportsLinks: false,
     oauthRequired: true,
-    setupInstructions: 'Requires TikTok for Developers account with Content Posting API (Direct Post). Posts are private (SELF_ONLY) until the app passes TikTok\'s audit.'
+    setupInstructions: 'Connect TikTok to send videos to your inbox. Finish editing and publishing in TikTok.'
   },
   threads: {
     displayName: 'Threads',

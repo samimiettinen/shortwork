@@ -1,153 +1,105 @@
-# ShortWork — Platform Setup Guide
+# ShortWork platform and deployment setup
 
-ShortWork publishes short videos to all major platforms through their official
-APIs. Each platform needs a developer app + credentials configured as Supabase
-Edge Function secrets (`Project Settings → Edge Functions → Secrets`).
+This guide describes the implemented integration paths as of 2026-10-30. Account access, quotas and provider review remain deployment-specific. See [dependency status](DEPENDENCY_STATUS.md) before attempting a release.
 
-## Environment variables (Supabase Edge Function secrets)
+## Server configuration
 
-| Variable | Used for |
-|---|---|
-| `APP_URL` | Where OAuth callbacks redirect back to (your deployed app URL) |
-| `OAUTH_STATE_SECRET` | (optional) HMAC key for signing OAuth state; falls back to the service role key |
-| `TOKEN_ENCRYPTION_KEY` | AES-GCM key for `oauth_tokens` (hex 64 chars or any string ≥ 32 chars). Without it tokens are stored as plaintext. |
-| `OAUTH_FRONTEND_CALLBACK` | Set to `true` to use SPA routes `/api/auth/callback/<provider>` as the OAuth redirect URI. Default (`false` or unset) keeps the existing Supabase function callback. |
-| `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` | Google Cloud OAuth client (YouTube Data API v3 enabled) |
-| `FACEBOOK_CLIENT_ID` / `FACEBOOK_CLIENT_SECRET` | Meta app (Facebook Login product) |
-| `INSTAGRAM_CLIENT_ID` / `INSTAGRAM_CLIENT_SECRET` | Same Meta app credentials as Facebook (Facebook Login variant) |
-| `LINKEDIN_CLIENT_ID` / `LINKEDIN_CLIENT_SECRET` | LinkedIn app with "Share on LinkedIn" + "Sign In with LinkedIn using OpenID Connect" products |
-| `X_CLIENT_ID` / `X_CLIENT_SECRET` | X developer app, OAuth 2.0 (confidential client) |
-| `TIKTOK_CLIENT_ID` / `TIKTOK_CLIENT_SECRET` | TikTok developer app **client_key / client_secret** (env names keep the `_CLIENT_ID` convention, but the value is TikTok's *client key*) |
-| `THREADS_CLIENT_ID` / `THREADS_CLIENT_SECRET` | Meta "Threads API" app credentials |
+Set the following as Supabase edge-function secrets. Never put them in `VITE_*` variables.
 
-Redirect URI to register with **every** provider (default, already in use):
+| Secret | Purpose |
+| --- | --- |
+| `APP_URL` | Deployed frontend origin, also used for OAuth return URLs and allowed origins |
+| `OAUTH_STATE_SECRET` | HMAC signing key for OAuth state; configure a dedicated random value |
+| `TOKEN_ENCRYPTION_KEY` | Encryption for stored OAuth credentials; use a random 64-character hex key and retain it across deploys |
+| `OAUTH_FRONTEND_CALLBACK` | Optional `true` selects the SPA callback routes; default uses the function callback |
+| `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET` | Google OAuth client with YouTube Data API enabled |
+| `FACEBOOK_CLIENT_ID`, `FACEBOOK_CLIENT_SECRET` | Meta app with Facebook Login and Page permissions |
+| `INSTAGRAM_CLIENT_ID`, `INSTAGRAM_CLIENT_SECRET` | Meta credentials for Instagram via Facebook Login |
+| `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | LinkedIn app with Share on LinkedIn and OpenID Connect |
+| `LINKEDIN_API_VERSION` | Optional version override, default `202610`; review against LinkedIn’s versioning policy |
+| `X_CLIENT_ID`, `X_CLIENT_SECRET` | Confidential OAuth 2.0 client with media and posting access |
+| `TIKTOK_CLIENT_ID`, `TIKTOK_CLIENT_SECRET` | TikTok **client key** and client secret; the environment variable keeps the `_CLIENT_ID` name |
+| `THREADS_CLIENT_ID`, `THREADS_CLIENT_SECRET` | Threads API app credentials |
 
-```
-https://<your-project-ref>.supabase.co/functions/v1/social-auth/callback/<provider>
-```
+Supabase supplies `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to the edge runtime. The browser needs only `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Without a token encryption key, legacy code can store plaintext; configure the key before connecting accounts. Never replace or discard a deployed key without migrating the existing encrypted tokens.
 
-e.g. `https://ehoawfmrfkcciqlzknvq.supabase.co/functions/v1/social-auth/callback/tiktok`
+Default provider redirect URI:
 
-Optional SPA aliases (only if `OAUTH_FRONTEND_CALLBACK=true` — register these **instead** of the function URL, and keep `APP_URL` in sync):
-
-```
-https://<APP_URL>/api/auth/callback/youtube
-https://<APP_URL>/api/auth/callback/facebook
-https://<APP_URL>/api/auth/callback/instagram
-https://<APP_URL>/api/auth/callback/tiktok
+```text
+https://<project-ref>.supabase.co/functions/v1/social-auth/callback/<provider>
 ```
 
-The SPA page forwards the authorization code to `social-auth/exchange/<provider>`. Client secrets never leave the edge function.
+If `OAUTH_FRONTEND_CALLBACK=true`, register this form instead:
 
-Permission smoke-test: authenticated `POST` to `social-verify` with `{ workspaceId, accountId }` fetches the channel/page/user name after a token refresh.
+```text
+https://<frontend-origin>/api/auth/callback/<provider>
+```
 
-## Per-platform requirements (verified July 2026)
+Use provider IDs `youtube`, `facebook`, `instagram`, `linkedin`, `x`, `tiktok`, `threads`. The SPA forwards codes to the server; client secrets remain server-side. Bluesky uses an App Password rather than these OAuth callbacks.
 
-### YouTube — works out of the box
-- Google Cloud project with **YouTube Data API v3** enabled.
-- Scopes: `youtube.upload`, `youtube.readonly`, `userinfo.profile`.
-- Auth URL uses `access_type=offline` and `prompt=consent` so Google always returns a refresh token. `ensureFreshToken` refreshes before each resumable upload.
-- **Quota:** each upload costs 1600 units of the 10,000/day default → ~6
-  uploads/day. Request a quota extension for more.
-- If the OAuth consent screen is in *Testing* mode, refresh tokens expire after
-  7 days — publish the consent screen to production.
-- Shorts are auto-detected: vertical/square video **≤ 3 minutes**. No special
-  flag or `#Shorts` tag needed.
+## Deploy in order
 
-### TikTok — Direct Post (Content Posting API)
-- TikTok for Developers app with **Login Kit** + **Content Posting API**
-  products, Direct Post configuration.
-- Scopes: `user.info.basic`, `video.upload`, `video.publish` (comma-separated;
-  TikTok uses `client_key`, which the code handles). Connect uses OAuth 2.0
-  PKCE (`S256`). **Existing TikTok connections must be reconnected** to pick
-  up `video.upload` and PKCE.
-- **Until the app passes TikTok's Content Posting audit, every post is forced
-  to private (SELF_ONLY) visibility** and max 5 users/24h may post. Apply for
-  the audit in the developer portal — it requires screen recordings of the
-  consent/preview UX.
-- The integration uses chunked FILE_UPLOAD (PULL_FROM_URL would require
-  DNS-verifying the storage domain, which is impossible for `*.supabase.co`;
-  if you front the storage bucket with e.g. `media.neuvottelija.fi`, verify
-  that domain in the TikTok portal and PULL_FROM_URL becomes an option).
-- Specs: MP4/WebM/MOV, H.264, ≤ 4GB, ≤ 10 min (per-creator cap comes from the
-  API, commonly 5 min). Access token 24h, refresh token 365 days (rotates —
-  handled automatically).
+1. Resolve the dependency gates, run checks and verify the target Supabase project.
+2. Apply pending database migrations. The `20261030…` migrations add accurate post outcomes, request IDs, post URLs, atomic queue functions, permissions and an explicitly private media bucket. The older hardening migration also tolerates a dashboard-only scheduler hook being absent on fresh installs.
+3. Configure secrets and deploy `social-auth`, `social-publish` and `publish-scheduled`, including their shared modules. Existing connected TikTok accounts are marked as inbox handoffs rather than auto-publish channels.
+4. Configure the scheduler below and confirm that it runs with empty and test queues.
+5. Release the frontend with its public environment variables. Keep SPA rewrites for application routes and optional OAuth callbacks.
+6. Test one controlled clip on each real destination, including visibility, returned IDs, Queue status, reconnects and a scheduled post. Automated mocks do not test provider approval, billing, runtime quotas, live credentials or production deployment.
 
-### Instagram — Reels via Facebook Login
-- Requires an **Instagram professional account linked to a Facebook Page**.
-- Meta app with Facebook Login; scopes `instagram_basic`,
-  `instagram_content_publish`, `pages_show_list`, `pages_read_engagement`,
-  `pages_manage_posts`
-  (+ `business_management` if the assets live in Business Manager).
-- **App Review (Advanced Access) + Business Verification** are required before
-  users without a role on the app can connect. For your own account, adding
-  yourself as app admin/tester in Development Mode is enough.
-- Connecting resolves all linked IG professional accounts automatically.
-  Long-lived user token lasts ~60 days; reconnect when flagged (Meta has no
-  refresh grant).
-- Reels specs: MP4/MOV, H.264/HEVC, 9:16 recommended, 3s–15min, ≤1GB, moov
-  atom at front. Quota: 100 API posts per rolling 24h.
-- The video URL must be publicly fetchable (Supabase public bucket URLs work).
+The endpoint requires a logged-in workspace owner, admin or editor and checks every requested channel. Only the service role can create and claim delivery jobs. Authenticated callers can cancel a scheduled request through `cancel_publish_request` before a target is claimed.
 
-### Facebook — Page Reels + page videos
-- Same Meta app; scopes `pages_show_list`, `pages_read_engagement`,
-  `pages_manage_posts`, `publish_video`.
-- Connecting stores a **Page access token per Page** (never expires when
-  derived from a long-lived user token — handled automatically).
-- Vertical videos 3–90s go to **Reels**; anything else goes to regular page
-  video (`file_url` ingestion). Reels: 9:16, ≥540×960, 24–60fps, <1GB.
-- If the app has "Require app secret" enabled, disable it or add
-  `appsecret_proof` support.
+## Enable scheduled publishing
 
-### LinkedIn
-- LinkedIn app with **Share on LinkedIn** and **Sign In with LinkedIn using
-  OpenID Connect** products. Scopes: `openid`, `profile`, `w_member_social`.
-- Native video upload via the versioned REST API (`/rest/videos`
-  initialize → upload parts → finalize → `/rest/posts`).
-- Tokens last 60 days and standard apps cannot refresh programmatically —
-  reconnect when flagged.
-- The `LinkedIn-Version` header is pinned in `_shared/publishers.ts`
-  (`LINKEDIN_VERSION`) — bump it periodically (must be ≤ 1 year old).
+The repository enables `pg_cron` and `pg_net` and creates `app_config.scheduler_token`. Configure a worker URL for the actual project, then schedule the HTTP call in the Supabase SQL editor. The existing `app_config` table is service-only; do not grant browser access.
 
-### X (Twitter)
-- X developer app with OAuth 2.0. Scopes now include **`media.write`**
-  (required for video upload) — **existing X connections must be reconnected**
-  to pick up the new scope.
-- Video: chunked upload via `/2/media/upload/initialize|append|finalize`,
-  `media_category=tweet_video`, then `/2/tweets` with `media_ids`.
-- Access tokens last 2h; refresh (with rotation) is automatic via
-  `offline.access`.
-- Note API tier limits: the free tier allows limited posts/month; media upload
-  requirements vary by tier — check the developer portal.
+```sql
+INSERT INTO public.app_config(key, value)
+VALUES ('publish_worker_url', 'https://<project-ref>.supabase.co/functions/v1/publish-scheduled')
+ON CONFLICT (key) DO UPDATE SET value = excluded.value;
 
-### Threads
-- Meta "Threads API" use case app. Scopes: `threads_basic`,
-  `threads_content_publish` (+ insights/replies for analytics).
-- Short-lived tokens are exchanged for 60-day tokens automatically at connect
-  time and refreshed (`th_refresh_token`) before publishing.
-- Video: container with `media_type=VIDEO` + `video_url` (public URL), polled
-  until processed, then published. Max 5 min video.
+SELECT cron.schedule(
+  'shortwork-publish-scheduled',
+  '* * * * *',
+  $job$
+    SELECT net.http_post(
+      url := (SELECT value FROM public.app_config WHERE key = 'publish_worker_url'),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer ' || (SELECT value FROM public.app_config WHERE key = 'scheduler_token')
+      ),
+      body := '{}'::jsonb,
+      timeout_milliseconds := 120000
+    );
+  $job$
+);
+```
 
-### Bluesky
-- No developer app needed — connect with handle + **App Password**
-  (Settings → Privacy and Security → App Passwords).
-- Video: uploaded through the Bluesky video service (`video.bsky.app`) with a
-  service-auth token, then embedded as `app.bsky.embed.video`. Limits: ≤100MB,
-  ≤3 min. Sessions are refreshed automatically before each publish.
+Inspect `cron.job` first and replace an existing job with that name instead of creating multiple schedules. Inspect `cron.job_run_details` and `net._http_response` to confirm both dispatch and HTTP results. A successful cron dispatch alone does not mean a provider publish succeeded.
 
-## Media hosting
+The worker claims one due destination per invocation with `FOR UPDATE SKIP LOCKED`; multiple destinations are dispatched over successive runs. It rechecks the author’s role, account connection and workspace media ownership at execution time. Interrupted deliveries older than ten minutes are marked for review on a later worker run. Outcomes with uncertain remote side effects are not automatically resent, avoiding duplicate public posts.
 
-Uploaded media goes to the public `social-media` storage bucket. Platforms
-that pull from URL (Instagram, Facebook, Threads) fetch it directly; platforms
-that need bytes (YouTube, TikTok, X, LinkedIn, Bluesky) are streamed the file
-by the edge function (downloaded once per publish, shared across platforms).
-Max upload size is 100MB (edge function memory bound).
+## Provider setup
 
-## Recommended short-video format (works everywhere)
+| Provider | Connection and publishing requirements |
+| --- | --- |
+| YouTube | Enable YouTube Data API and connect the owning Google account. Offline access and refresh are implemented. The composer selects visibility, defaulting to private. A separate title or network override can be used; otherwise the first caption line becomes the title. The made-for-kids choice is sent with the upload. Provider processing and audit restrictions may still limit visibility. |
+| Instagram | Professional account linked to a managed Facebook Page. Facebook Login grants `instagram_basic`, `instagram_content_publish`, `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, and `business_management`. The composer also controls whether the Reel appears in the feed. Users outside app roles may require Meta review and verification. |
+| Facebook | A managed Page, not a personal profile. The connector resolves Page tokens. The adapter uses its Reels route for vertical 3–90 second clips and regular Page video otherwise. |
+| LinkedIn | Personal profile with `openid`, `profile`, `w_member_social`. Video initialize/upload/finalize waits for `AVAILABLE` before creating a post. Company Page authoring is not implemented. The default API version is `202610`; [LinkedIn publishes and sunsets versions](https://learn.microsoft.com/en-us/linkedin/marketing/versioning). |
+| X | OAuth 2.0 with `tweet.read`, `tweet.write`, `users.read`, `media.write`, `offline.access`. Reconnect accounts missing media access. The adapter uploads chunks, confirms processing and creates the post. Developer-plan access and billing must be checked in the account portal. |
+| Threads | Threads app scopes from the shared provider registry. The adapter waits for an explicit finished container status before publication. |
+| Bluesky | Handle plus an App Password. Sessions are refreshed and videos pass through the video service. The standard-mode 3-minute/100 MiB profile is an application limit, not a claim about Bluesky’s current maximum. |
+| TikTok | Login Kit plus Content Posting API **Upload**, with `video.upload`. The app uses chunked `FILE_UPLOAD` to `/v2/post/publish/inbox/video/init/`. The user opens the inbox notification to add the caption, choose visibility and publish. This is [TikTok’s documented upload handoff](https://developers.tiktok.com/doc/content-posting-api-reference-upload-video). The app does not use Direct Post or choose privacy for the creator. |
 
-- **MP4, H.264 + AAC, 1080×1920 (9:16), 24–60fps, ≤ 90 seconds, ≤ 100MB**
-- ≤ 90s keeps Facebook Reels eligibility; ≤ 3min keeps YouTube Shorts
-  classification; ≤ 3min is the Bluesky cap; X free-tier caps at 2:20.
-- Write the first line of your post text as the title (used by YouTube,
-  TikTok, LinkedIn and Facebook); keep the whole text ≤ 280 chars if X is a
-  target.
+TikTok Direct Post has separate review and user-experience requirements, including current creator information and explicit privacy selection. Review the [official sharing guidelines](https://developers.tiktok.com/doc/content-sharing-guidelines) before implementing that feature.
+
+YouTube quotas should be read from the project console and [current API documentation](https://developers.google.com/youtube/data/reference/rest/v3/videos/insert). Older copies of this guide’s “1,600 units per upload” calculation were stale; no fixed daily upload allowance is promised here.
+
+## Media storage and limits
+
+- `social-media` is private. Each upload path begins with its workspace UUID. Only that workspace’s media is accepted; arbitrary remote media URLs are rejected.
+- The browser probes duration and dimensions with an object URL, releases that URL, uploads the file and obtains a preview URL. It rejects unreadable metadata instead of silently scheduling a broken video.
+- Saved requests store `media_path`, `media_type`, `media_meta`, `platform_overrides`, the master title, YouTube visibility/audience and Instagram feed preference in `per_channel_overrides`. The server creates fresh signed URLs at dispatch. Legacy internal storage URLs are accepted only after checking the origin, bucket and workspace folder.
+- URL-based providers fetch a signed URL. The server reads media once for validation and shares the blob with byte-upload providers. Reads enforce allowed MIME types, the 100 MiB cap and a timeout; codec compatibility still needs provider validation.
+- Detaching media does not delete a file that an accepted or uncertain request might still reference. Establish a retention/cleanup job that excludes files referenced by active requests before deleting abandoned uploads.
+- There is no transcoding, cropping, caption generation or long-running media service. The short-video limits keep this within the current edge-function design; high-volume or large-media processing needs a dedicated worker.

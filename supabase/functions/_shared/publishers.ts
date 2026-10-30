@@ -4,7 +4,7 @@
 // Every platform supports short-video publishing where the platform API
 // allows it:
 //   youtube   – resumable upload (Shorts are auto-detected: vertical, <=3min)
-//   tiktok    – Content Posting API direct post (chunked FILE_UPLOAD)
+//   tiktok    – Content Posting API inbox upload (chunked FILE_UPLOAD)
 //   instagram – Reels container + publish (video pulled from public URL)
 //   facebook  – Page Reels (9:16 short video) or regular page video
 //   linkedin  – versioned Videos API (initialize/upload/finalize) + Posts API
@@ -12,14 +12,15 @@
 //   threads   – VIDEO container + publish
 //   bluesky   – video service upload + app.bsky.embed.video record
 
-const GRAPH_VERSION = 'v25.0';
-const LINKEDIN_VERSION = '202506';
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-export interface MediaMeta {
-  width?: number;
-  height?: number;
-  durationSeconds?: number;
-}
+const GRAPH_VERSION = 'v25.0';
+const LINKEDIN_VERSION = Deno.env.get('LINKEDIN_API_VERSION') || '202610';
+
+import { validateForPlatform, type MediaMeta, type DeliveryResult } from './publishing-contract.ts';
+import { fetchMediaBlob } from './media.ts';
+export { fetchMediaBlob } from './media.ts';
+export type { MediaMeta } from './publishing-contract.ts';
 
 export interface PublishOptions {
   // platform_user_id (page id / ig user id / channel id / did / person sub ...)
@@ -36,29 +37,20 @@ export interface PublishOptions {
   mediaMeta?: MediaMeta;
   // pre-fetched media bytes, shared across platforms to avoid re-downloading
   mediaBlob?: Blob | null;
+  youtubeVisibility?: 'private' | 'unlisted' | 'public';
+  verticalShort?: boolean;
+  videoTitle?: string;
+  youtubeMadeForKids?: boolean;
+  instagramShareToFeed?: boolean;
 }
 
-export interface ProviderResult {
-  success: boolean;
-  postId?: string;
-  postUrl?: string;
-  error?: string;
-  needsReconnect?: boolean;
-}
+export type ProviderResult = DeliveryResult;
 
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-export async function fetchMediaBlob(mediaUrl: string): Promise<Blob> {
-  const response = await fetch(mediaUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch media: ${response.status} ${response.statusText}`);
-  }
-  return await response.blob();
-}
 
 function firstLine(text: string, maxLen: number): string {
   const line = text.split('\n')[0].trim();
@@ -76,7 +68,7 @@ function isVertical(meta?: MediaMeta): boolean {
 
 const REFRESHABLE = new Set(['youtube', 'x', 'tiktok', 'threads', 'bluesky']);
 
-async function markNeedsReconnect(supabase: any, socialAccountId: string) {
+async function markNeedsReconnect(supabase: SupabaseClient, socialAccountId: string) {
   await supabase
     .from('social_accounts')
     .update({ status: 'needs_refresh', updated_at: new Date().toISOString() })
@@ -87,7 +79,7 @@ import { encryptToken, decryptToken } from "./token-crypto.ts";
 export { decryptToken } from "./token-crypto.ts";
 
 async function persistToken(
-  supabase: any,
+  supabase: SupabaseClient,
   socialAccountId: string,
   token: { accessToken: string; refreshToken?: string; expiresAt?: Date | null }
 ) {
@@ -98,10 +90,11 @@ async function persistToken(
   if (token.refreshToken) update.refresh_token = await encryptToken(token.refreshToken);
   if (token.expiresAt !== undefined) update.expires_at = token.expiresAt ? token.expiresAt.toISOString() : null;
 
-  await supabase
+  const { error } = await supabase
     .from('oauth_tokens')
     .update(update)
     .eq('social_account_id', socialAccountId);
+  if (error) throw new Error('Could not save refreshed credentials; reconnect the channel');
 }
 
 // Refresh an access token for platforms that support it. Returns updated
@@ -109,7 +102,7 @@ async function persistToken(
 export async function ensureFreshToken(
   platform: string,
   options: PublishOptions,
-  supabase: any
+  supabase: SupabaseClient
 ): Promise<{ accessToken: string; refreshToken?: string; error?: string; needsReconnect?: boolean }> {
   const { accessToken, refreshToken, tokenExpiresAt, socialAccountId } = options;
 
@@ -296,12 +289,14 @@ export async function ensureFreshToken(
 export async function publishToProvider(
   platform: string,
   options: PublishOptions,
-  supabase: any
+  supabase: SupabaseClient
 ): Promise<ProviderResult> {
+  const errors = validateForPlatform(platform, { ...options, hasMedia: !!options.mediaUrl });
+  if (errors.length) return { success: false, error: errors.join('. '), needsUserAction: true };
   // Refresh tokens up front for all platforms that support it
   const fresh = await ensureFreshToken(platform, options, supabase);
-  if (fresh.needsReconnect) {
-    return { success: false, error: fresh.error, needsReconnect: true };
+  if (fresh.error) {
+    return { success: false, error: fresh.error, needsReconnect: fresh.needsReconnect };
   }
   const opts: PublishOptions = {
     ...options,
@@ -346,8 +341,7 @@ async function publishToFacebook(options: PublishOptions): Promise<ProviderResul
 
       if (reelsEligible) {
         const reelResult = await publishFacebookReel(pageId, accessToken, content, mediaUrl);
-        if (reelResult.success) return reelResult;
-        console.error('Facebook Reel publish failed, falling back to page video:', reelResult.error);
+        return reelResult; // An uncertain Reel must never trigger a second Page video.
       }
 
       const response = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${pageId}/videos`, {
@@ -356,12 +350,12 @@ async function publishToFacebook(options: PublishOptions): Promise<ProviderResul
         body: JSON.stringify({
           file_url: mediaUrl,
           description: content,
-          title: firstLine(content, 65),
+          title: options.videoTitle || firstLine(content, 65),
           access_token: accessToken,
         }),
       });
       const data = await response.json();
-      if (data.error) return { success: false, error: data.error.message };
+      if (!response.ok || data.error || !data.id) return { success: false, needsUserAction: true, error: data.error?.message || 'Facebook did not confirm the video. Check the Page before retrying.' };
       return {
         success: true,
         postId: data.id,
@@ -385,14 +379,14 @@ async function publishToFacebook(options: PublishOptions): Promise<ProviderResul
       body: JSON.stringify(body),
     });
     const data = await response.json();
-    if (data.error) return { success: false, error: data.error.message };
+    if (!response.ok || data.error || !(data.id || data.post_id)) return { success: false, needsUserAction: true, error: data.error?.message || 'Facebook did not confirm the post. Check the Page before retrying.' };
     return {
       success: true,
       postId: data.id || data.post_id,
       postUrl: `https://facebook.com/${data.post_id || data.id}`,
     };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    return { success: false, needsUserAction: true, error: 'Delivery could not be confirmed. Check the platform before retrying.' };
   }
 }
 
@@ -431,7 +425,8 @@ async function publishFacebookReel(
 
   // Wait until Facebook has ingested the file before finishing
   {
-    const deadline = Date.now() + 90_000;
+    let ingested = false;
+    const deadline = Date.now() + 45_000;
     while (Date.now() < deadline) {
       await sleep(5000);
       const statusResponse = await fetch(
@@ -443,11 +438,12 @@ async function publishFacebookReel(
       if (processingErrors?.length) {
         return { success: false, error: `Facebook Reel processing error: ${processingErrors[0]?.message || 'unknown'}` };
       }
-      if (uploadPhase === 'complete') break;
+      if (uploadPhase === 'complete') { ingested = true; break; }
       if (uploadPhase === 'error') {
         return { success: false, error: 'Facebook Reel upload failed during ingestion' };
       }
     }
+    if (!ingested) return { success: false, needsUserAction: true, postId: startData.video_id, error: 'Facebook ingestion timed out. Check the Page before retrying.' };
   }
 
   // Phase 3: publish
@@ -463,8 +459,8 @@ async function publishFacebookReel(
     { method: 'POST' }
   );
   const finishData = await finishResponse.json();
-  if (finishData.error) {
-    return { success: false, error: finishData.error.message };
+  if (!finishResponse.ok || finishData.error || finishData.success !== true) {
+    return { success: false, error: finishData.error?.message || 'Facebook did not confirm the publish request', needsUserAction: true, postId: startData.video_id };
   }
 
   // finish returns success:true as an acknowledgment only — confirm via status
@@ -477,7 +473,7 @@ async function publishFacebookReel(
       );
       const statusData = await statusResponse.json().catch(() => ({}));
       const publishing = statusData.status?.publishing_phase;
-      if (publishing?.status === 'complete') break;
+      if (publishing?.status === 'complete') return { success: true, postId: startData.video_id, postUrl: `https://www.facebook.com/reel/${startData.video_id}` };
       if (publishing?.status === 'error') {
         return { success: false, error: publishing.errors?.[0]?.message || 'Facebook Reel publish failed' };
       }
@@ -485,9 +481,9 @@ async function publishFacebookReel(
   }
 
   return {
-    success: true,
+    success: false, needsUserAction: true,
     postId: startData.video_id,
-    postUrl: `https://www.facebook.com/reel/${startData.video_id}`,
+    error: 'Facebook is still processing this Reel. Check the Page before retrying.',
   };
 }
 
@@ -510,7 +506,7 @@ async function publishToInstagram(options: PublishOptions): Promise<ProviderResu
     if (mediaType === 'video') {
       containerBody.media_type = 'REELS';
       containerBody.video_url = mediaUrl;
-      containerBody.share_to_feed = 'true';
+      containerBody.share_to_feed = options.instagramShareToFeed === false ? 'false' : 'true';
     } else {
       containerBody.image_url = mediaUrl;
     }
@@ -524,8 +520,8 @@ async function publishToInstagram(options: PublishOptions): Promise<ProviderResu
       }
     );
     const containerData = await containerResponse.json();
-    if (containerData.error) {
-      return { success: false, error: containerData.error.message };
+    if (!containerResponse.ok || containerData.error || !containerData.id) {
+      return { success: false, error: containerData.error?.message || 'Media container was not created' };
     }
 
     // Videos are processed asynchronously — poll the container status
@@ -543,8 +539,8 @@ async function publishToInstagram(options: PublishOptions): Promise<ProviderResu
       }
     );
     const publishData = await publishResponse.json();
-    if (publishData.error) {
-      return { success: false, error: publishData.error.message };
+    if (!publishResponse.ok || publishData.error || !publishData.id) {
+      return { success: false, error: publishData.error?.message || 'Publication was not confirmed', needsUserAction: true };
     }
 
     // Fetch the real permalink (the media id is not a valid shortcode)
@@ -559,7 +555,7 @@ async function publishToInstagram(options: PublishOptions): Promise<ProviderResu
 
     return { success: true, postId: publishData.id, postUrl };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    return { success: false, needsUserAction: true, error: 'Delivery could not be confirmed. Check the platform before retrying.' };
   }
 }
 
@@ -590,7 +586,7 @@ async function pollInstagramContainer(
 
 // LinkedIn "little text" format: these characters must be escaped in commentary
 function escapeLinkedInText(text: string): string {
-  return text.replace(/[\(\)\{\}\[\]<>@|~_*\\]/g, (c) => `\\${c}`);
+  return text.replace(/[(){}[\]<>@|~_*\\]/g, (c) => `\\${c}`);
 }
 
 async function publishToLinkedIn(options: PublishOptions): Promise<ProviderResult> {
@@ -603,14 +599,13 @@ async function publishToLinkedIn(options: PublishOptions): Promise<ProviderResul
     if (mediaUrl && mediaType === 'video') {
       const upload = await uploadLinkedInVideo(authorUrn, accessToken, mediaUrl, mediaBlob);
       if (!upload.ok) return { success: false, error: upload.error };
-      mediaContent = { media: { id: upload.urn, title: firstLine(content, 100) } };
+      mediaContent = { media: { id: upload.urn, title: options.videoTitle || firstLine(content, 100) } };
     } else if (mediaUrl && mediaType !== 'video') {
       const upload = await uploadLinkedInImage(authorUrn, accessToken, mediaUrl, mediaBlob);
-      if (upload.ok) {
-        mediaContent = { media: { id: upload.urn, altText: firstLine(content, 100) } };
-      }
+      if (!upload.ok) return { success: false, error: upload.error };
+      mediaContent = { media: { id: upload.urn, altText: firstLine(content, 100) } };
     } else if (linkUrl) {
-      mediaContent = { article: { source: linkUrl, title: firstLine(content, 100) } };
+      mediaContent = { article: { source: linkUrl, title: options.videoTitle || firstLine(content, 100) } };
     }
 
     const postBody: Record<string, unknown> = {
@@ -644,13 +639,14 @@ async function publishToLinkedIn(options: PublishOptions): Promise<ProviderResul
     }
 
     const postUrn = response.headers.get('x-restli-id') || response.headers.get('x-linkedin-id') || '';
+    if (!postUrn) return { success: false, needsUserAction: true, error: 'LinkedIn accepted the request without returning a post ID. Check LinkedIn before retrying.' };
     return {
       success: true,
       postId: postUrn,
       postUrl: postUrn ? `https://www.linkedin.com/feed/update/${postUrn}/` : 'https://www.linkedin.com/feed/',
     };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    return { success: false, needsUserAction: true, error: 'Delivery could not be confirmed. Check the platform before retrying.' };
   }
 }
 
@@ -726,7 +722,7 @@ async function uploadLinkedInVideo(
 
   // 4. Wait until LinkedIn finishes processing so the post doesn't 404
   const encodedUrn = encodeURIComponent(videoUrn);
-  const deadline = Date.now() + 120_000;
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     await sleep(5000);
     const statusResponse = await fetch(`https://api.linkedin.com/rest/videos/${encodedUrn}`, { headers });
@@ -737,8 +733,7 @@ async function uploadLinkedInVideo(
       return { ok: false, error: 'LinkedIn could not process the video' };
     }
   }
-  // Processing usually completes shortly; proceed optimistically
-  return { ok: true, urn: videoUrn };
+  return { ok: false, error: 'LinkedIn video processing timed out; no post was created' };
 }
 
 async function uploadLinkedInImage(
@@ -816,7 +811,7 @@ async function publishToX(options: PublishOptions): Promise<ProviderResult> {
       postUrl: `https://x.com/i/status/${data.data.id}`,
     };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    return { success: false, needsUserAction: true, error: 'Delivery could not be confirmed. Check the platform before retrying.' };
   }
 }
 
@@ -881,7 +876,7 @@ async function uploadXMedia(
 
   // 4. Poll processing status for videos
   let processingInfo = finalizeData.data?.processing_info;
-  const deadline = Date.now() + 120_000;
+  const deadline = Date.now() + 60_000;
   while (processingInfo && processingInfo.state !== 'succeeded' && Date.now() < deadline) {
     if (processingInfo.state === 'failed') {
       return { ok: false, error: processingInfo.error?.message || 'X could not process the video' };
@@ -893,9 +888,10 @@ async function uploadXMedia(
     );
     const statusData = await statusResponse.json().catch(() => ({}));
     processingInfo = statusData.data?.processing_info;
-    if (!statusResponse.ok) break;
+    if (!statusResponse.ok || !processingInfo) return { ok: false, error: 'Could not confirm X media processing; no post was created' };
   }
 
+  if (processingInfo && processingInfo.state !== 'succeeded') return { ok: false, error: 'X video processing timed out; no post was created' };
   return { ok: true, mediaId };
 }
 
@@ -933,19 +929,20 @@ async function publishToThreads(options: PublishOptions): Promise<ProviderResult
       }
     );
     const containerData = await containerResponse.json();
-    if (containerData.error) {
-      return { success: false, error: containerData.error.message };
+    if (!containerResponse.ok || containerData.error || !containerData.id) {
+      return { success: false, error: containerData.error?.message || 'Media container was not created' };
     }
 
     // Step 2: wait for processing (videos take a while)
-    const deadline = Date.now() + (mediaType === 'video' ? 120_000 : 30_000);
+    const deadline = Date.now() + (mediaType === 'video' ? 60_000 : 30_000);
     let status = 'IN_PROGRESS';
     while (Date.now() < deadline) {
       const statusResponse = await fetch(
         `https://graph.threads.net/v1.0/${containerData.id}?fields=status,error_message&access_token=${accessToken}`
       );
       const statusData = await statusResponse.json();
-      status = statusData.status || 'FINISHED';
+      if (!statusResponse.ok || !statusData.status) return { success: false, error: 'Could not confirm Threads media status; no post was created' };
+      status = statusData.status;
       if (status === 'FINISHED') break;
       if (status === 'ERROR') {
         return { success: false, error: statusData.error_message || 'Threads could not process the media' };
@@ -966,8 +963,8 @@ async function publishToThreads(options: PublishOptions): Promise<ProviderResult
       }
     );
     const publishData = await publishResponse.json();
-    if (publishData.error) {
-      return { success: false, error: publishData.error.message };
+    if (!publishResponse.ok || publishData.error || !publishData.id) {
+      return { success: false, error: publishData.error?.message || 'Publication was not confirmed', needsUserAction: true };
     }
 
     // Fetch permalink
@@ -982,12 +979,12 @@ async function publishToThreads(options: PublishOptions): Promise<ProviderResult
 
     return { success: true, postId: publishData.id, postUrl };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    return { success: false, needsUserAction: true, error: 'Delivery could not be confirmed. Check the platform before retrying.' };
   }
 }
 
 // ---------------------------------------------------------------------------
-// TikTok — Content Posting API direct post with chunked FILE_UPLOAD
+// TikTok — Content Posting API inbox upload with chunked FILE_UPLOAD
 // ---------------------------------------------------------------------------
 
 const TIKTOK_MIN_CHUNK = 5 * 1024 * 1024;   // 5MB
@@ -1001,39 +998,7 @@ async function publishToTikTok(options: PublishOptions): Promise<ProviderResult>
   }
 
   try {
-    // 1. Query creator info — required by TikTok before posting, and tells us
-    //    which privacy levels this account/app may use
-    const creatorResponse = await fetch(
-      'https://open.tiktokapis.com/v2/post/publish/creator_info/query/',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json; charset=UTF-8',
-        },
-      }
-    );
-    const creatorData = await creatorResponse.json();
-    if (creatorData.error?.code && creatorData.error.code !== 'ok') {
-      return { success: false, error: `TikTok: ${creatorData.error.message || creatorData.error.code}` };
-    }
-
-    const creatorUsername: string | undefined = creatorData.data?.creator_username;
-    const privacyOptions: string[] = creatorData.data?.privacy_level_options || [];
-    // Prefer public; unaudited API clients are only allowed SELF_ONLY (drafts
-    // visible to the creator) until the app passes TikTok's audit
-    const privacyLevel = privacyOptions.includes('PUBLIC_TO_EVERYONE')
-      ? 'PUBLIC_TO_EVERYONE'
-      : (privacyOptions[0] || 'SELF_ONLY');
-
-    const maxDuration = creatorData.data?.max_video_post_duration_sec;
-    if (maxDuration && options.mediaMeta?.durationSeconds && options.mediaMeta.durationSeconds > maxDuration) {
-      return { success: false, error: `TikTok: video exceeds this account's max duration of ${maxDuration}s` };
-    }
-
-    // 2. Download the video and initialize a chunked upload.
-    //    (PULL_FROM_URL would require verifying the storage domain with
-    //    TikTok, so FILE_UPLOAD is used instead.)
+    // Inbox upload uses video.upload; the user finishes editing and posting in TikTok.
     const blob = mediaBlob ?? await fetchMediaBlob(mediaUrl);
     const videoSize = blob.size;
 
@@ -1048,7 +1013,7 @@ async function publishToTikTok(options: PublishOptions): Promise<ProviderResult>
     }
 
     const initResponse = await fetch(
-      'https://open.tiktokapis.com/v2/post/publish/video/init/',
+      'https://open.tiktokapis.com/v2/post/publish/inbox/video/init/',
       {
         method: 'POST',
         headers: {
@@ -1056,14 +1021,6 @@ async function publishToTikTok(options: PublishOptions): Promise<ProviderResult>
           'Content-Type': 'application/json; charset=UTF-8',
         },
         body: JSON.stringify({
-          post_info: {
-            title: content.substring(0, 2200),
-            privacy_level: privacyLevel,
-            disable_duet: creatorData.data?.duet_disabled ?? false,
-            disable_comment: creatorData.data?.comment_disabled ?? false,
-            disable_stitch: creatorData.data?.stitch_disabled ?? false,
-            is_aigc: false,
-          },
           source_info: {
             source: 'FILE_UPLOAD',
             video_size: videoSize,
@@ -1074,8 +1031,8 @@ async function publishToTikTok(options: PublishOptions): Promise<ProviderResult>
       }
     );
     const initData = await initResponse.json();
-    if (initData.error?.code && initData.error.code !== 'ok') {
-      return { success: false, error: `TikTok init failed: ${initData.error.message || initData.error.code}` };
+    if (!initResponse.ok || (initData.error?.code && initData.error.code !== 'ok')) {
+      return { success: false, error: `TikTok init failed: ${initData.error?.message || initData.error?.code || 'Upload initialization failed'}` };
     }
     const { publish_id: publishId, upload_url: uploadUrl } = initData.data || {};
     if (!publishId || !uploadUrl) {
@@ -1101,59 +1058,12 @@ async function publishToTikTok(options: PublishOptions): Promise<ProviderResult>
       }
     }
 
-    // 4. Poll publish status
-    const deadline = Date.now() + 120_000;
-    while (Date.now() < deadline) {
-      await sleep(5000);
-      const statusResponse = await fetch(
-        'https://open.tiktokapis.com/v2/post/publish/status/fetch/',
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json; charset=UTF-8',
-          },
-          body: JSON.stringify({ publish_id: publishId }),
-        }
-      );
-      const statusData = await statusResponse.json();
-      const status = statusData.data?.status;
-
-      if (status === 'PUBLISH_COMPLETE') {
-        // Note: the field name is misspelled in TikTok's API, and the array is
-        // empty until moderation of a public post completes
-        const videoId = statusData.data?.publicaly_available_post_id?.[0];
-        const profileUrl = creatorUsername ? `https://www.tiktok.com/@${creatorUsername}` : 'https://www.tiktok.com/';
-        return {
-          success: true,
-          postId: String(videoId || publishId),
-          postUrl: videoId && creatorUsername
-            ? `https://www.tiktok.com/@${creatorUsername}/video/${videoId}`
-            : profileUrl,
-        };
-      }
-      if (status === 'FAILED') {
-        return { success: false, error: `TikTok publish failed: ${statusData.data?.fail_reason || 'unknown reason'}` };
-      }
-      // PROCESSING_UPLOAD / PROCESSING_DOWNLOAD / SEND_TO_USER_INBOX → keep waiting
-      if (status === 'SEND_TO_USER_INBOX') {
-        return {
-          success: true,
-          postId: publishId,
-          postUrl: 'https://www.tiktok.com/',
-          error: undefined,
-        };
-      }
-    }
-
-    // Upload was accepted; TikTok finishes processing asynchronously
     return {
-      success: true,
-      postId: publishId,
-      postUrl: 'https://www.tiktok.com/',
+      success: false, needsUserAction: true, postId: publishId,
+      error: 'Video sent to TikTok. Open your TikTok inbox to edit the caption, choose visibility and finish publishing.',
     };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    return { success: false, needsUserAction: true, error: 'Delivery could not be confirmed. Check the platform before retrying.' };
   }
 }
 
@@ -1235,7 +1145,7 @@ async function publishToBluesky(options: PublishOptions): Promise<ProviderResult
       postUrl: `https://bsky.app/profile/${did}/post/${rkey}`,
     };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    return { success: false, needsUserAction: true, error: 'Delivery could not be confirmed. Check the platform before retrying.' };
   }
 }
 
@@ -1283,7 +1193,7 @@ async function uploadBlueskyVideo(
   job = job.jobStatus || job;
 
   // 3. Poll processing status
-  const deadline = Date.now() + 120_000;
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     if (job.state === 'JOB_STATE_COMPLETED' && job.blob) {
       return { ok: true, blob: job.blob };
@@ -1321,7 +1231,7 @@ async function publishToYouTube(options: PublishOptions): Promise<ProviderResult
     const videoBlob = mediaBlob ?? await fetchMediaBlob(mediaUrl);
     const videoSize = videoBlob.size;
 
-    const title = firstLine(content, 100);
+    const title = options.videoTitle || firstLine(content, 100);
 
     const metadata = {
       snippet: {
@@ -1330,8 +1240,8 @@ async function publishToYouTube(options: PublishOptions): Promise<ProviderResult
         categoryId: '22', // People & Blogs
       },
       status: {
-        privacyStatus: 'public',
-        selfDeclaredMadeForKids: false,
+        privacyStatus: options.youtubeVisibility || 'private',
+        selfDeclaredMadeForKids: options.youtubeMadeForKids === true,
       },
     };
 
@@ -1380,12 +1290,13 @@ async function publishToYouTube(options: PublishOptions): Promise<ProviderResult
     }
 
     const uploadData = await uploadResponse.json();
+    if (!uploadData.id) return { success: false, needsUserAction: true, error: 'YouTube accepted the upload without returning an ID. Check YouTube Studio before retrying.' };
     return {
       success: true,
       postId: uploadData.id,
       postUrl: `https://youtube.com/watch?v=${uploadData.id}`,
     };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    return { success: false, needsUserAction: true, error: 'Delivery could not be confirmed. Check the platform before retrying.' };
   }
 }

@@ -295,6 +295,7 @@ export type Database = {
           publish_attempts: number
           published_at: string | null
           remote_post_id: string | null
+          remote_post_url: string | null
           social_account_id: string
           status: Database["public"]["Enums"]["post_target_status"]
           updated_at: string
@@ -310,6 +311,7 @@ export type Database = {
           publish_attempts?: number
           published_at?: string | null
           remote_post_id?: string | null
+          remote_post_url?: string | null
           social_account_id: string
           status?: Database["public"]["Enums"]["post_target_status"]
           updated_at?: string
@@ -325,6 +327,7 @@ export type Database = {
           publish_attempts?: number
           published_at?: string | null
           remote_post_id?: string | null
+          remote_post_url?: string | null
           social_account_id?: string
           status?: Database["public"]["Enums"]["post_target_status"]
           updated_at?: string
@@ -351,6 +354,7 @@ export type Database = {
           asset_id: string | null
           body_text: string | null
           created_at: string
+          client_request_id?: string | null
           created_by: string
           id: string
           link_url: string | null
@@ -367,6 +371,7 @@ export type Database = {
           asset_id?: string | null
           body_text?: string | null
           created_at?: string
+          client_request_id?: string | null
           created_by: string
           id?: string
           link_url?: string | null
@@ -383,6 +388,7 @@ export type Database = {
           asset_id?: string | null
           body_text?: string | null
           created_at?: string
+          client_request_id?: string | null
           created_by?: string
           id?: string
           link_url?: string | null
@@ -742,6 +748,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cancel_publish_request: { Args: { p_post: string }; Returns: undefined }
       accept_workspace_invitation: {
         Args: { invitation_token: string }
         Returns: Json
@@ -788,6 +795,8 @@ export type Database = {
         | "threads"
         | "youtube"
       post_status:
+        | "partial"
+        | "needs_user_action"
         | "draft"
         | "pending_approval"
         | "approved"
@@ -951,6 +960,8 @@ export const Constants = {
         "youtube",
       ],
       post_status: [
+        "partial",
+        "needs_user_action",
         "draft",
         "pending_approval",
         "approved",

@@ -99,7 +99,7 @@ const Auth = () => {
             <div className="w-12 h-12 rounded-xl bg-primary-foreground/20 flex items-center justify-center">
               <Zap className="w-7 h-7" />
             </div>
-            <span className="text-2xl font-display font-bold">ShortsPublish</span>
+            <span className="text-2xl font-display font-bold">ShortWork</span>
           </div>
           <h1 className="text-4xl font-display font-bold mb-4">Schedule & publish short videos everywhere</h1>
           <p className="text-primary-foreground/80 text-lg">Manage all your social channels from one powerful dashboard. Save time, grow your audience.</p>
@@ -112,7 +112,7 @@ const Auth = () => {
             <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center">
               <Zap className="w-6 h-6 text-primary-foreground" />
             </div>
-            <span className="text-xl font-display font-bold">ShortsPublish</span>
+            <span className="text-xl font-display font-bold">ShortWork</span>
           </div>
 
           <h2 className="text-2xl font-display font-bold mb-2">{isLogin ? "Welcome back" : "Create your account"}</h2>

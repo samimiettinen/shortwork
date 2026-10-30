@@ -1,824 +1,236 @@
-import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Progress } from "@/components/ui/progress";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
-import { useErrorHandler } from "@/hooks/use-error-handler";
-import { 
-  Send, Loader2, AlertCircle, CheckCircle, Link2, Image, 
-  Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Upload, X, Youtube, FileVideo, Play, RefreshCw
-} from "lucide-react";
-import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
+import { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useToast } from '@/hooks/use-toast';
+import { useErrorHandler } from '@/hooks/use-error-handler';
+import { Send, Calendar, Upload, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { PLATFORM_CONFIG, type ProviderName } from '@/lib/social/types';
+import { uploadMedia, mediaMetadata, type UploadedMedia } from '@/lib/social/media';
+import { sendPublish, type PublishResponse } from '@/lib/social/publish';
+import { IMAGE_TYPES, VIDEO_TYPES, PLATFORM_LIMITS, platformVariant, validateForPlatform,
+  type PublishPayload, type Platform, type PlatformOverrides } from '../../../supabase/functions/_shared/publishing-contract';
 
-interface SocialAccount {
-  id: string;
-  platform: ProviderName;
-  display_name: string;
-  handle: string | null;
-  avatar_url: string | null;
-  status: string;
-}
-
-interface PublishResult {
-  accountId: string;
-  platform: string;
-  success: boolean;
-  postId?: string;
-  postUrl?: string;
-  error?: string;
-  needsReconnect?: boolean;
-}
-
-interface UploadedMedia {
-  url: string;
-  type: 'image' | 'video';
-  name: string;
-  size: number;
-  thumbnailUrl?: string;
-  duration?: number;
-  width?: number;
-  height?: number;
-}
-
-const platformIcons: Record<string, React.ReactNode> = {
-  youtube: <Youtube className="w-4 h-4" />,
-  instagram: <Instagram className="w-4 h-4" />,
-  facebook: <Facebook className="w-4 h-4" />,
-  linkedin: <Linkedin className="w-4 h-4" />,
-  x: <Twitter className="w-4 h-4" />,
-  tiktok: <Video className="w-4 h-4" />,
-  threads: <MessageCircle className="w-4 h-4" />,
-  bluesky: <Cloud className="w-4 h-4" />,
+interface SocialAccount { id: string; platform: ProviderName; display_name: string; handle: string | null }
+interface LocalVariant { content?: string; title?: string; localTime?: string }
+const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-const ACCEPTED_VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
-
-interface SocialPublisherProps {
-  workspaceId: string;
-}
-
-export function SocialPublisher({ workspaceId }: SocialPublisherProps) {
+// A single composer stays mounted when changing delivery mode: the master
+// media, caption and per-network edits are never uploaded or entered twice.
+export function SocialPublisher({ workspaceId, mode = 'publish' }: { workspaceId: string; mode?: 'publish' | 'schedule' }) {
   const { toast } = useToast();
   const { handleError } = useErrorHandler();
   const navigate = useNavigate();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const requestId = useRef(crypto.randomUUID());
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
-  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
-  const [content, setContent] = useState("");
-  const [linkUrl, setLinkUrl] = useState("");
-  const [mediaUrl, setMediaUrl] = useState("");
-  const [uploadedMedia, setUploadedMedia] = useState<UploadedMedia | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [content, setContent] = useState('');
+  const [videoTitle, setVideoTitle] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
+  const [media, setMedia] = useState<UploadedMedia | null>(null);
+  const [variants, setVariants] = useState<Partial<Record<Platform, LocalVariant>>>({});
+  const [verticalShort, setVerticalShort] = useState(true);
+  const [visibility, setVisibility] = useState<'private' | 'unlisted' | 'public'>('private');
+  const [madeForKids, setMadeForKids] = useState(false);
+  const [shareToFeed, setShareToFeed] = useState(true);
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+  const [previewPlatform, setPreviewPlatform] = useState<Platform>('youtube');
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const [results, setResults] = useState<PublishResult[] | null>(null);
-  const [reconnecting, setReconnecting] = useState<string | null>(null);
-  const [videoPreviewOpen, setVideoPreviewOpen] = useState(false);
-
-  // Backend now returns a needsReconnect flag; fall back to keyword sniff only
-  // for older responses that lack it.
-  const needsReconnection = (r: PublishResult) => {
-    if (r.needsReconnect) return true;
-    const error = r.error;
-    if (!error) return false;
-    const reconnectKeywords = ['reconnect', 'expired', 'invalid authentication', 'authentication credentials', 'access token', 'refresh token'];
-    return reconnectKeywords.some(k => error.toLowerCase().includes(k));
-  };
-
+  const [receipt, setReceipt] = useState<PublishResponse | null>(null);
+  const chosen = accounts.filter(a => selected.includes(a.id));
+  const platforms = [...new Set(chosen.map(a => a.platform))];
+  const busy = publishing || uploading;
+  useEffect(() => { requestId.current = crypto.randomUUID(); },
+    [workspaceId, selected, content, videoTitle, linkUrl, media, variants, verticalShort, visibility, madeForKids, shareToFeed, date, time, mode]);
   useEffect(() => {
-    loadAccounts();
-  }, [workspaceId]);
-
-  const loadAccounts = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('social_accounts')
-        .select('id, platform, display_name, handle, avatar_url, status')
-        .eq('workspace_id', workspaceId)
-        .eq('status', 'connected');
-
-      if (error) throw error;
-      setAccounts(data || []);
-    } catch (error) {
-      handleError(error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleReconnect = async (platform: string, accountId: string) => {
-    // Bluesky uses app-password credentials, not OAuth — send user to Channels
-    if (platform === 'bluesky') {
-      navigate('/channels');
-      return;
-    }
-
-    setReconnecting(accountId);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      const response = await supabase.functions.invoke('social-auth/connect/' + platform, {
-        body: { userId: user.id, workspaceId, returnUrl: '/compose' },
+    let active = true;
+    setLoading(true);
+    supabase.from('social_accounts').select('id, platform, display_name, handle')
+      .eq('workspace_id', workspaceId).eq('status', 'connected').then(({ data, error }) => {
+        if (!active) return;
+        if (error) handleError(error);
+        else setAccounts(data || []);
+        setLoading(false);
       });
+    return () => { active = false; };
+  }, [workspaceId, handleError]);
 
-      if (response.error) throw response.error;
+  const platformOverrides: PlatformOverrides = Object.fromEntries(Object.entries(variants).map(([platform, value]) =>
+    [platform, { content: value.content || undefined, title: value.title || undefined }]));
+  const base: PublishPayload = { workspaceId, requestId: requestId.current, content, videoTitle: videoTitle || undefined,
+    targetAccountIds: selected, linkUrl: linkUrl || undefined, mediaPath: media?.path, mediaType: media?.type,
+    mediaMeta: mediaMetadata(media), youtubeVisibility: visibility, verticalShort, platformOverrides,
+    youtubeMadeForKids: madeForKids, instagramShareToFeed: shareToFeed };
+  const errorsFor = (platform: string) => validateForPlatform(platform, { ...platformVariant(base, platform), hasMedia: !!media });
+  const errors = [...new Set(platforms.flatMap(errorsFor))];
+  if (platforms.length && (!content.trim() || content.length > 10000)) errors.unshift('Enter a master caption between 1 and 10,000 characters');
+  const preview = platformVariant(base, previewPlatform);
+  const editVariant = (platform: Platform, key: keyof LocalVariant, value: string) =>
+    setVariants(current => ({ ...current, [platform]: { ...current[platform], [key]: value } }));
 
-      const authUrl = response.data?.authUrl;
-      if (!authUrl) throw new Error(response.data?.message || 'Could not start reconnect');
-
-      const isInIframe = window.self !== window.top;
-      if (isInIframe) {
-        // Open in a new tab from a user-initiated click to bypass iframe/OAuth blockers
-        const win = window.open(authUrl, '_blank', 'noopener');
-        if (!win) {
-          toast({
-            title: 'Popup blocked',
-            description: 'Allow popups or open Channels to reconnect.',
-            variant: 'destructive',
-          });
-        } else {
-          toast({ title: 'Reconnecting…', description: `Complete sign-in in the new tab, then retry publish.` });
-        }
-      } else {
-        window.location.href = authUrl;
-      }
-    } catch (error) {
-      handleError(error);
-    } finally {
-      setReconnecting(null);
-    }
-  };
-
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type
-    const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
-    const isVideo = ACCEPTED_VIDEO_TYPES.includes(file.type);
-    
-    if (!isImage && !isVideo) {
-      toast({
-        title: "Invalid file type",
-        description: "Please upload an image (JPEG, PNG, GIF, WebP) or video (MP4, MOV, WebM)",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      toast({
-        title: "File too large",
-        description: "Maximum file size is 100MB",
-        variant: "destructive",
-      });
-      return;
-    }
-
+    if (!file || busy) return;
     setUploading(true);
-    setUploadProgress(0);
-
-    try {
-      // Generate thumbnail for video files
-      let thumbnailUrl: string | undefined;
-      let duration: number | undefined;
-      let width: number | undefined;
-      let height: number | undefined;
-
-      if (isVideo) {
-        try {
-          setUploadProgress(5);
-          const thumbData = await generateVideoThumbnail(file);
-          thumbnailUrl = thumbData.thumbnailUrl;
-          duration = thumbData.duration;
-          width = thumbData.width;
-          height = thumbData.height;
-          setUploadProgress(15);
-        } catch (thumbError) {
-          console.warn('Could not generate thumbnail:', thumbError);
-        }
-      }
-
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${workspaceId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-
-      // Simulate progress for better UX
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => Math.min(prev + 10, 90));
-      }, 200);
-
-      const { data, error } = await supabase.storage
-        .from('social-media')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false,
-        });
-
-      clearInterval(progressInterval);
-
-      if (error) throw error;
-
-      // Bucket is private — issue a signed URL for preview and publishing.
-      // Backend re-signs before dispatching to external providers.
-      const { data: signed, error: signErr } = await supabase.storage
-        .from('social-media')
-        .createSignedUrl(data.path, 60 * 60 * 24);
-      if (signErr || !signed?.signedUrl) throw signErr || new Error('Could not sign upload URL');
-      const previewUrl = signed.signedUrl;
-
-      setUploadProgress(100);
-
-      setUploadedMedia({
-        url: previewUrl,
-        type: isVideo ? 'video' : 'image',
-        name: file.name,
-        size: file.size,
-        thumbnailUrl,
-        duration,
-        width,
-        height,
-      });
-      setMediaUrl(previewUrl);
-
-      toast({
-        title: "Upload complete",
-        description: `${isVideo ? 'Video' : 'Image'} uploaded successfully`,
-      });
-    } catch (error) {
-      handleError(error);
-    } finally {
-      setUploading(false);
-      setUploadProgress(0);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+    try { setMedia(await uploadMedia(workspaceId, file)); setReceipt(null); }
+    catch (error) { handleError(error); }
+    finally { setUploading(false); if (fileInput.current) fileInput.current.value = ''; }
+  };
+  const submit = async () => {
+    if (busy) return;
+    const problems = [...errors];
+    if (!selected.length) problems.push('Select at least one connected channel');
+    const payload = { ...base, platformOverrides: { ...platformOverrides } };
+    if (mode === 'schedule') {
+      const scheduled = new Date(`${date}T${time}`);
+      if (!Number.isFinite(scheduled.getTime()) || scheduled.getTime() < Date.now()+30_000) problems.push('Choose a time at least 30 seconds in the future');
+      else payload.scheduledAt = scheduled.toISOString();
+      for (const platform of platforms) {
+        const localTime = variants[platform]?.localTime;
+        if (!localTime) continue;
+        const scheduled = new Date(localTime);
+        if (!Number.isFinite(scheduled.getTime()) || scheduled.getTime() < Date.now()+30_000) problems.push(`Choose a valid future time for ${PLATFORM_CONFIG[platform].displayName}`);
+        else payload.platformOverrides[platform] = { ...payload.platformOverrides[platform], scheduledAt: scheduled.toISOString() };
       }
     }
-  };
-
-  const removeMedia = async () => {
-    if (uploadedMedia) {
-      // Extract file path from URL (strip signed-URL query string)
-      const urlParts = uploadedMedia.url.split('/social-media/');
-      if (urlParts[1]) {
-        const path = urlParts[1].split('?')[0];
-        await supabase.storage
-          .from('social-media')
-          .remove([path]);
-      }
-    }
-    setUploadedMedia(null);
-    setMediaUrl("");
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  };
-
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const generateVideoThumbnail = (file: File): Promise<{ thumbnailUrl: string; duration: number; width: number; height: number }> => {
-    return new Promise((resolve, reject) => {
-      const video = document.createElement('video');
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      
-      video.preload = 'metadata';
-      video.muted = true;
-      video.playsInline = true;
-      
-      video.onloadedmetadata = () => {
-        // Seek to 25% of the video for a better thumbnail
-        video.currentTime = video.duration * 0.25;
-      };
-      
-      video.onseeked = () => {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.8);
-        const duration = video.duration;
-        const width = video.videoWidth;
-        const height = video.videoHeight;
-
-        // Cleanup
-        URL.revokeObjectURL(video.src);
-        video.remove();
-        canvas.remove();
-
-        resolve({ thumbnailUrl, duration, width, height });
-      };
-      
-      video.onerror = () => {
-        URL.revokeObjectURL(video.src);
-        reject(new Error('Failed to load video'));
-      };
-      
-      video.src = URL.createObjectURL(file);
-    });
-  };
-
-  const toggleAccount = (accountId: string) => {
-    setSelectedAccounts(prev => 
-      prev.includes(accountId) 
-        ? prev.filter(id => id !== accountId)
-        : [...prev, accountId]
-    );
-    setResults(null);
-  };
-
-  const getContentLimit = () => {
-    if (selectedAccounts.length === 0) return 2200;
-    
-    const selectedPlatforms = accounts
-      .filter(a => selectedAccounts.includes(a.id))
-      .map(a => a.platform);
-    
-    return Math.min(...selectedPlatforms.map(p => PLATFORM_CONFIG[p]?.maxLength || 2200));
-  };
-
-  const validateContent = (): string[] => {
-    const errors: string[] = [];
-    
-    if (!content.trim()) {
-      errors.push("Please enter some content");
-    }
-    
-    if (selectedAccounts.length === 0) {
-      errors.push("Please select at least one channel");
-    }
-    
-    const limit = getContentLimit();
-    if (content.length > limit) {
-      errors.push(`Content exceeds character limit (${content.length}/${limit})`);
-    }
-    
-    // Check Instagram/TikTok/YouTube requires media
-    const requiresMedia = accounts
-      .filter(a => selectedAccounts.includes(a.id))
-      .some(a => ['instagram', 'tiktok', 'youtube'].includes(a.platform));
-    
-    if (requiresMedia && !mediaUrl && !uploadedMedia) {
-      errors.push("Selected platform(s) require an image or video");
-    }
-    
-    return errors;
-  };
-
-  const handlePublish = async () => {
-    const errors = validateContent();
-    if (errors.length > 0) {
-      toast({
-        title: "Validation Error",
-        description: errors.join(". "),
-        variant: "destructive",
-      });
-      return;
-    }
-
+    if (problems.length) { toast({ title: 'Check your post', description: problems.join('. '), variant: 'destructive' }); return; }
     setPublishing(true);
-    setResults(null);
-
     try {
-      const response = await supabase.functions.invoke('social-publish', {
-        body: {
-          workspaceId,
-          content,
-          linkUrl: linkUrl || undefined,
-          // Prioritize uploaded media over manually entered URL
-          mediaUrl: uploadedMedia?.url || mediaUrl || undefined,
-          // Pass the media type for platform-specific validation
-          mediaType: uploadedMedia?.type || undefined,
-          // Video dimensions/duration let the backend pick Reels vs regular
-          // video and validate per-platform duration limits
-          mediaMeta: uploadedMedia ? {
-            width: uploadedMedia.width,
-            height: uploadedMedia.height,
-            durationSeconds: uploadedMedia.duration,
-          } : undefined,
-          targetAccountIds: selectedAccounts,
-        },
-      });
-
-      if (response.error) throw response.error;
-
-      const data = response.data;
-      setResults(data.results);
-
-      if (data.status === 'published') {
-        toast({
-          title: "Published Successfully!",
-          description: `Posted to ${data.summary.succeeded} channel(s)`,
-        });
-        // Clear form on success
-        setContent("");
-        setLinkUrl("");
-        setMediaUrl("");
-        setUploadedMedia(null);
-        setSelectedAccounts([]);
-      } else if (data.status === 'partial') {
-        toast({
-          title: "Partially Published",
-          description: `${data.summary.succeeded} succeeded, ${data.summary.failed} failed`,
-          variant: "destructive",
-        });
+      const response = await sendPublish(payload);
+      setReceipt(response);
+      if (response.status === 'scheduled') {
+        toast({ title: 'Scheduled', description: `${response.summary.total} channels. Track each destination in Queue.` });
+        navigate('/queue');
       } else {
-        toast({
-          title: "Publishing Failed",
-          description: "Could not publish to any channels",
-          variant: "destructive",
-        });
+        toast({ title: response.status === 'published' ? 'Published' : response.status === 'publishing' ? 'Publishing is in progress' : 'Publishing results',
+          description: `${response.summary.succeeded} published, ${response.summary.needsAction} need attention, ${response.summary.failed} failed.` });
+        if (response.status !== 'publishing') setSelected(response.results.filter(r => !r.success && !r.needsUserAction).map(r => r.accountId));
       }
-    } catch (error) {
-      handleError(error);
-    } finally {
-      setPublishing(false);
-    }
+    } catch (error) { handleError(error); }
+    finally { setPublishing(false); }
   };
 
-  const isOverLimit = content.length > getContentLimit();
-
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="py-8 flex items-center justify-center">
-          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (accounts.length === 0) {
-    return (
-      <Card>
-        <CardContent className="py-8 text-center">
-          <AlertCircle className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground">No connected channels found</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Connect your social accounts in the Channels page first
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Publish to Social Media</CardTitle>
-      </CardHeader>
+  if (loading) return <div role="status" className="p-8"><Loader2 className="w-6 h-6 animate-spin" />Loading channels…</div>;
+  return <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+    <Card><CardHeader><CardTitle>One video, every connected channel</CardTitle></CardHeader>
       <CardContent className="space-y-6">
-        {/* Content */}
-        <div>
-          <Label>Content</Label>
-          <Textarea
-            value={content}
-            onChange={(e) => {
-              setContent(e.target.value);
-              setResults(null);
-            }}
-            placeholder="What do you want to share?"
-            className={`mt-1.5 min-h-[120px] ${isOverLimit ? 'border-destructive focus-visible:ring-destructive' : ''}`}
-            disabled={publishing}
-          />
-          <div className="flex justify-between mt-1">
-            <p className={`text-xs ${isOverLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
-              {content.length}/{getContentLimit()} characters
-            </p>
-            {isOverLimit && (
-              <p className="text-xs text-destructive">Content too long for selected channels</p>
-            )}
+        <fieldset disabled={busy} className="space-y-5 min-w-0">
+          <div className="space-y-2">
+            <Label>Master video</Label>
+            <input ref={fileInput} type="file" className="hidden" onChange={handleFile} accept={[...VIDEO_TYPES, ...IMAGE_TYPES].join(',')} />
+            {!media ? <Button type="button" variant="outline" onClick={() => fileInput.current?.click()} disabled={busy}>
+              {uploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />} {uploading ? 'Reading and uploading…' : 'Upload video'}
+            </Button> : <div className="rounded-lg border p-3 flex items-center justify-between gap-2">
+              <div><p className="font-medium text-sm">{media.name}</p><p className="text-xs text-muted-foreground">
+                {media.width && `${media.width} × ${media.height} · ${media.duration?.toFixed(1)}s · `}{media.size < 1024*1024 ? `${(media.size/1024).toFixed(1)} KiB` : `${(media.size/1024/1024).toFixed(1)} MiB`}
+              </p></div>
+              <Button aria-label="Remove media" size="icon" variant="ghost" onClick={() => setMedia(null)}><X className="w-4 h-4" /></Button>
+            </div>}
+            <label className="flex items-center gap-2 text-sm"><Checkbox checked={verticalShort} onCheckedChange={value => setVerticalShort(value === true)} /> Reel/Short mode · 9:16 vertical</label>
+            <p className="text-xs text-muted-foreground">Use one MP4 with H.264 video and AAC audio, ideally 1080 × 1920. For every destination including Facebook Reels, use 4–90 seconds and up to 100 MiB.</p>
           </div>
-        </div>
-
-        {/* Media Upload */}
-        <div>
-          <Label className="flex items-center gap-2">
-            <Upload className="w-4 h-4" /> Media (optional)
-          </Label>
-          
-          {/* Hidden file input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={[...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_VIDEO_TYPES].join(',')}
-            onChange={handleFileSelect}
-            className="hidden"
-            disabled={uploading || publishing}
-          />
-
-          {/* Upload area or preview */}
-          {!uploadedMedia && !mediaUrl ? (
-            <div 
-              onClick={() => !uploading && !publishing && fileInputRef.current?.click()}
-              className={`mt-1.5 border-2 border-dashed rounded-xl p-6 text-center transition-colors cursor-pointer
-                ${uploading ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 hover:bg-muted/30'}`}
-            >
-              {uploading ? (
-                <div className="space-y-3">
-                  <Loader2 className="w-8 h-8 mx-auto text-primary animate-spin" />
-                  <p className="text-sm font-medium">Uploading...</p>
-                  <Progress value={uploadProgress} className="w-full max-w-xs mx-auto" />
+          <div className="space-y-1"><Label htmlFor="master-caption">Caption</Label>
+            <Textarea id="master-caption" value={content} onChange={e => setContent(e.target.value)} placeholder="What do you want to share?" className="min-h-[130px]" />
+            <p className="text-xs text-muted-foreground">{content.length} characters · customize shorter versions below for X and Bluesky.</p>
+          </div>
+          <div className="space-y-1"><Label htmlFor="video-title">Video title (optional)</Label>
+            <Input id="video-title" value={videoTitle} maxLength={100} onChange={e => setVideoTitle(e.target.value)} placeholder="Uses the first caption line if left empty" />
+          </div>
+          <div className="space-y-1"><Label htmlFor="post-link">Link (optional)</Label>
+            <Input id="post-link" type="url" value={linkUrl} onChange={e => setLinkUrl(e.target.value)} placeholder="https://…" />
+          </div>
+          <div className="flex items-center justify-between gap-2"><Label>Destinations</Label>
+            <Button type="button" variant="outline" size="sm" onClick={() => { setSelected(accounts.map(a => a.id)); setReceipt(null); }}>Select all connected</Button>
+          </div>
+          {!accounts.length && <p className="text-sm text-muted-foreground">Connect accounts in <Link to="/channels" className="underline">Channels</Link> to publish.</p>}
+          <div className="space-y-2">{accounts.map(account => {
+            const result = receipt?.results.find(r => r.accountId === account.id);
+            return <label key={account.id} className="flex items-center gap-3 rounded-lg border p-3 cursor-pointer">
+              <Checkbox checked={selected.includes(account.id)} onCheckedChange={() => { setSelected(ids => ids.includes(account.id) ? ids.filter(id => id !== account.id) : [...ids, account.id]); }} />
+              <span className="h-7 w-1 rounded" style={{ backgroundColor: PLATFORM_CONFIG[account.platform]?.color }} />
+              <span className="flex-1 text-sm"><span className="font-medium">{account.display_name}</span><span className="block text-xs text-muted-foreground">{PLATFORM_CONFIG[account.platform]?.displayName}</span></span>
+              {result ? <Badge variant={result.success ? 'default' : 'secondary'}>{result.success ? 'Posted' : result.needsUserAction ? 'Action needed' : receipt?.status === 'publishing' ? 'In progress' : 'Failed'}</Badge>
+                : selected.includes(account.id) && <Badge variant={errorsFor(account.platform).length ? 'destructive' : 'secondary'}>{errorsFor(account.platform).length ? 'Check' : account.platform === 'tiktok' ? 'Inbox handoff' : 'Ready'}</Badge>}
+            </label>;
+          })}</div>
+          {platforms.length > 0 && <div className="space-y-3"><h3 className="text-sm font-semibold">Customize by network</h3>
+            {platforms.map(platform => {
+              const variant = platformVariant(base, platform);
+              return <details key={platform} className="rounded-lg border p-3">
+                <summary className="cursor-pointer text-sm font-medium">{PLATFORM_CONFIG[platform].displayName} <span className="text-muted-foreground font-normal">· {variant.content.length}/{PLATFORM_LIMITS[platform]} characters</span></summary>
+                <div className="mt-3 space-y-3">
+                  <Label htmlFor={`caption-${platform}`}>{PLATFORM_CONFIG[platform].displayName} caption</Label>
+                  <Textarea id={`caption-${platform}`} value={variants[platform]?.content || ''} placeholder="Use the master caption" onChange={e => editVariant(platform, 'content', e.target.value)} />
+                  {['youtube', 'facebook', 'linkedin'].includes(platform) && <div>
+                    <Label htmlFor={`title-${platform}`}>{PLATFORM_CONFIG[platform].displayName} title</Label>
+                    <Input id={`title-${platform}`} value={variants[platform]?.title || ''} maxLength={100} placeholder="Use the master title" onChange={e => editVariant(platform, 'title', e.target.value)} />
+                  </div>}
+                  {mode === 'schedule' && <div><Label htmlFor={`time-${platform}`}>{PLATFORM_CONFIG[platform].displayName} publishing time (optional)</Label>
+                    <Input id={`time-${platform}`} type="datetime-local" value={variants[platform]?.localTime || ''} onChange={e => editVariant(platform, 'localTime', e.target.value)} />
+                  </div>}
+                  {platform === 'tiktok' && <p className="text-xs text-muted-foreground">This caption is kept in your publishing plan. Paste it in TikTok when completing the inbox upload.</p>}
                 </div>
-              ) : (
-                <>
-                  <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-                  <p className="font-medium text-sm">Click to upload or drag & drop</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Images (JPEG, PNG, GIF, WebP) or Videos (MP4, MOV, WebM) up to 100MB
-                  </p>
-                  <div className="flex justify-center gap-2 mt-3">
-                    <Badge variant="outline" className="text-xs">
-                      <Image className="w-3 h-3 mr-1" /> Images
-                    </Badge>
-                    <Badge variant="outline" className="text-xs">
-                      <FileVideo className="w-3 h-3 mr-1" /> Videos
-                    </Badge>
-                  </div>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="mt-1.5 relative border rounded-xl p-4 bg-muted/30">
-              <div className="flex items-center gap-4">
-                {/* Preview */}
-                <div 
-                  className={`w-20 h-20 rounded-lg bg-muted flex items-center justify-center overflow-hidden flex-shrink-0 relative ${
-                    uploadedMedia?.type === 'video' ? 'cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all' : ''
-                  }`}
-                  onClick={() => uploadedMedia?.type === 'video' && setVideoPreviewOpen(true)}
-                  title={uploadedMedia?.type === 'video' ? 'Click to preview video' : undefined}
-                >
-                  {uploadedMedia?.type === 'video' ? (
-                    <div className="relative w-full h-full bg-black flex items-center justify-center">
-                      {uploadedMedia.thumbnailUrl ? (
-                        <img 
-                          src={uploadedMedia.thumbnailUrl} 
-                          alt="Video thumbnail" 
-                          className="absolute inset-0 w-full h-full object-cover"
-                        />
-                      ) : (
-                        <video 
-                          ref={videoRef}
-                          src={uploadedMedia.url} 
-                          className="absolute inset-0 w-full h-full object-cover"
-                          muted
-                          preload="metadata"
-                        />
-                      )}
-                      <div className="absolute inset-0 bg-black/30 flex items-center justify-center group-hover:bg-black/20 transition-colors">
-                        <Play className="w-6 h-6 text-white drop-shadow-lg" />
-                      </div>
-                      {uploadedMedia.duration && (
-                        <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] px-1 rounded">
-                          {formatDuration(uploadedMedia.duration)}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <img 
-                      src={uploadedMedia?.url || mediaUrl} 
-                      alt="Preview" 
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  )}
-                </div>
-                
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">
-                    {uploadedMedia?.name || 'External media URL'}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    <Badge variant="secondary" className="text-xs">
-                      {uploadedMedia?.type === 'video' ? (
-                        <><FileVideo className="w-3 h-3 mr-1" /> Video</>
-                      ) : (
-                        <><Image className="w-3 h-3 mr-1" /> Image</>
-                      )}
-                    </Badge>
-                    {uploadedMedia?.size && (
-                      <span className="text-xs text-muted-foreground">
-                        {formatFileSize(uploadedMedia.size)}
-                      </span>
-                    )}
-                    {uploadedMedia?.duration && (
-                      <span className="text-xs text-muted-foreground">
-                        • {formatDuration(uploadedMedia.duration)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Remove button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={removeMedia}
-                  disabled={publishing}
-                  className="flex-shrink-0"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Alternative: URL input */}
-          {!uploadedMedia && !mediaUrl && (
-            <div className="mt-3">
-              <Label className="text-xs text-muted-foreground">Or paste a media URL</Label>
-              <Input
-                value={mediaUrl}
-                onChange={(e) => setMediaUrl(e.target.value)}
-                placeholder="https://... (image or video URL)"
-                className="mt-1"
-                disabled={publishing || uploading}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Link URL */}
-        <div>
-          <Label className="flex items-center gap-2">
-            <Link2 className="w-4 h-4" /> Link URL (optional)
-          </Label>
-          <Input
-            value={linkUrl}
-            onChange={(e) => setLinkUrl(e.target.value)}
-            placeholder="https://..."
-            className="mt-1.5"
-            disabled={publishing}
-          />
-        </div>
-
-        {/* Channel Selection */}
-        <div>
-          <Label>Publish to</Label>
-          <div className="mt-2 space-y-2">
-            {accounts.map((account) => {
-              const config = PLATFORM_CONFIG[account.platform];
-              const isSelected = selectedAccounts.includes(account.id);
-              const result = results?.find(r => r.accountId === account.id);
-              
-              return (
-                <label
-                  key={account.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    isSelected 
-                      ? 'border-primary bg-primary/5' 
-                      : 'border-border hover:bg-muted/50'
-                  } ${publishing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                >
-                  <Checkbox
-                    checked={isSelected}
-                    onCheckedChange={() => !publishing && toggleAccount(account.id)}
-                    disabled={publishing}
-                  />
-                  <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-white"
-                    style={{ backgroundColor: config?.color || '#666' }}
-                  >
-                    {platformIcons[account.platform]}
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium text-sm">{account.display_name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {config?.displayName} {account.handle && `• ${account.handle}`}
-                    </p>
-                  </div>
-                  
-                  {/* Result status */}
-                  {result && (
-                    <Badge variant={result.success ? "default" : "destructive"} className="ml-auto">
-                      {result.success ? (
-                        <><CheckCircle className="w-3 h-3 mr-1" /> Posted</>
-                      ) : (
-                        <><AlertCircle className="w-3 h-3 mr-1" /> Failed</>
-                      )}
-                    </Badge>
-                  )}
-                </label>
-              );
+              </details>;
             })}
-          </div>
-        </div>
-
-        {/* Results */}
-        {results && results.some(r => !r.success) && (
-          <Alert variant="destructive">
-            <AlertCircle className="w-4 h-4" />
-            <AlertDescription>
-              <ul className="mt-1 space-y-2">
-                {results.filter(r => !r.success).map((r, i) => (
-                  <li key={i} className="text-sm">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <strong className="capitalize">{r.platform}:</strong> {r.error}
-                      </div>
-                      {needsReconnection(r) && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="shrink-0 h-7 text-xs bg-background hover:bg-muted"
-                          onClick={() => handleReconnect(r.platform, r.accountId)}
-                          disabled={reconnecting === r.accountId}
-                        >
-                          {reconnecting === r.accountId ? (
-                            <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Opening…</>
-                          ) : (
-                            <><RefreshCw className="w-3 h-3 mr-1" /> Reconnect</>
-                          )}
-                        </Button>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* Publish Button */}
-        <Button
-          onClick={handlePublish}
-          disabled={publishing || selectedAccounts.length === 0 || !content.trim() || isOverLimit}
-          className="w-full bg-gradient-primary hover:opacity-90"
-        >
-          {publishing ? (
-            <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Publishing...</>
-          ) : (
-            <><Send className="w-4 h-4 mr-2" /> Publish to {selectedAccounts.length} Channel{selectedAccounts.length !== 1 ? 's' : ''}</>
-          )}
+          </div>}
+          {platforms.includes('youtube') && <div className="rounded-lg border p-3 space-y-3">
+            <Label htmlFor="youtube-visibility">YouTube visibility</Label>
+            <select id="youtube-visibility" value={visibility} onChange={e => setVisibility(e.target.value as typeof visibility)} className="w-full rounded-md border bg-background p-2">
+              <option value="private">Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option>
+            </select>
+            <label className="flex items-center gap-2 text-sm"><Checkbox checked={madeForKids} onCheckedChange={value => setMadeForKids(value === true)} /> YouTube: made for kids</label>
+          </div>}
+          {platforms.includes('instagram') && <label className="flex items-center gap-2 text-sm"><Checkbox checked={shareToFeed} onCheckedChange={value => setShareToFeed(value === true)} /> Show Instagram Reel in feed</label>}
+          {mode === 'schedule' && <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3"><div><Label htmlFor="schedule-date">Date</Label><Input id="schedule-date" type="date" min={localToday()} value={date} onChange={e => setDate(e.target.value)} /></div>
+              <div><Label htmlFor="schedule-time">Time</Label><Input id="schedule-time" type="time" value={time} onChange={e => setTime(e.target.value)} /></div></div>
+            <p className="text-xs text-muted-foreground">Default for every destination, unless customized above. Times use {Intl.DateTimeFormat().resolvedOptions().timeZone}; channels dispatch as the worker runs.</p>
+          </div>}
+        </fieldset>
+        {platforms.includes('tiktok') && <Alert><AlertDescription>TikTok receives the video in your inbox. Open TikTok to add the caption, choose visibility and finish publishing.</AlertDescription></Alert>}
+        {errors.length > 0 && <ul className="text-sm text-destructive space-y-1" aria-live="polite">{errors.map(error => <li key={error}>{error}</li>)}</ul>}
+        {receipt && <div className="rounded-lg border p-3 space-y-3" aria-live="polite"><div className="flex justify-between"><h3 className="font-medium text-sm">Delivery results</h3><Link className="text-sm underline" to="/queue">Open Queue</Link></div>
+          {receipt.results.map(result => <div key={result.accountId} className="text-sm flex items-start gap-2">
+            {result.success ? <CheckCircle className="w-4 h-4 shrink-0 text-green-600" /> : <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />}
+            <div><strong className="capitalize">{result.platform}</strong>: {result.success ? 'Published' : result.error || 'Check Queue for the current status.'}
+              {result.postUrl && /^https:\/\//.test(result.postUrl) && <a className="ml-2 underline" href={result.postUrl} target="_blank" rel="noopener noreferrer">Open post</a>}
+              {result.platform === 'tiktok' && result.needsUserAction && <Button size="sm" variant="outline" className="ml-2" onClick={() => navigator.clipboard.writeText(platformVariant(base, 'tiktok').content).then(() => toast({ title: 'TikTok caption copied' })).catch(handleError)}>Copy caption</Button>}
+            </div>
+          </div>)}
+        </div>}
+        <Button className="w-full" onClick={submit} disabled={busy || !selected.length || !!errors.length || (mode === 'schedule' && (!date || !time))}>
+          {publishing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : mode === 'schedule' ? <Calendar className="w-4 h-4 mr-2" /> : <Send className="w-4 h-4 mr-2" />}
+          {mode === 'schedule' ? 'Schedule post' : !selected.length ? 'Select channels to publish' : `Publish to ${selected.length} Channel${selected.length === 1 ? '' : 's'}`}
         </Button>
       </CardContent>
-
-      {/* Video Preview Modal */}
-      <Dialog open={videoPreviewOpen} onOpenChange={setVideoPreviewOpen}>
-        <DialogContent className="sm:max-w-4xl p-0 overflow-hidden bg-black">
-          <DialogHeader className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent">
-            <DialogTitle className="text-white truncate pr-8">
-              {uploadedMedia?.name || 'Video Preview'}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="relative w-full aspect-video bg-black">
-            {uploadedMedia?.type === 'video' && videoPreviewOpen && (
-              <video
-                src={uploadedMedia.url}
-                controls
-                autoPlay
-                className="w-full h-full object-contain"
-                controlsList="nodownload"
-              >
-                Your browser does not support the video tag.
-              </video>
-            )}
-          </div>
-          {uploadedMedia?.duration && (
-            <div className="absolute bottom-4 left-4 flex items-center gap-3 text-white/80 text-sm">
-              <Badge variant="secondary" className="bg-white/20 text-white border-0">
-                <FileVideo className="w-3 h-3 mr-1" />
-                {formatDuration(uploadedMedia.duration)}
-              </Badge>
-              {uploadedMedia.size && (
-                <span className="text-white/60">
-                  {formatFileSize(uploadedMedia.size)}
-                </span>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </Card>
-  );
+    <Card className="self-start xl:sticky xl:top-20"><CardHeader><CardTitle className="text-base">Preview</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        <Label htmlFor="preview-network">Preview network</Label>
+        <select id="preview-network" className="w-full border rounded-md bg-background p-2" value={previewPlatform} onChange={e => setPreviewPlatform(e.target.value as Platform)}>
+          {Object.entries(PLATFORM_CONFIG).map(([platform, config]) => <option key={platform} value={platform}>{config.displayName}</option>)}
+        </select>
+        <div className="aspect-[9/16] bg-black rounded-xl overflow-hidden flex items-center justify-center">
+          {media?.type === 'video' ? <video controls playsInline src={media.url} className="h-full w-full object-contain" /> : media ? <img alt="Selected media" src={media.url} className="w-full h-full object-contain" /> : <span className="text-white/60 text-sm">Your 9:16 master video</span>}
+        </div>
+        {preview.videoTitle && <p className="font-medium text-sm">{preview.videoTitle}</p>}
+        <p className="text-sm whitespace-pre-wrap break-words">{preview.content || 'Your caption preview'}</p>
+        <p className="text-xs text-muted-foreground">Layout preview. The platform controls its final interface and processing.</p>
+      </CardContent>
+    </Card>
+  </div>;
 }

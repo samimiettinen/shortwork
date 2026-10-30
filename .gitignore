@@ -25,3 +25,8 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Local checks and browser-test artifacts
+playwright-report/
+test-results/
+.supabase/

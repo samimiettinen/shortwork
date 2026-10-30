@@ -21,7 +21,7 @@ const Platforms = () => {
         <Alert className="mb-6 border-primary/40 bg-primary/5">
           <Zap className="w-4 h-4" />
           <AlertDescription>
-            <strong>Universal format that publishes cleanly to every platform:</strong>{" "}
+            <strong>Recommended ShortWork format:</strong>{" "}
             {UNIVERSAL_FORMAT.container}, {UNIVERSAL_FORMAT.resolution}{" "}
             ({UNIVERSAL_FORMAT.aspectRatio}), ≤{UNIVERSAL_FORMAT.maxDurationSec}s,
             ≤{UNIVERSAL_FORMAT.maxSizeMB}MB. {UNIVERSAL_FORMAT.copyRule}
@@ -34,13 +34,13 @@ const Platforms = () => {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg">{p.name}</CardTitle>
-                  {p.directPublish && <Badge variant="secondary">Direct publish</Badge>}
+                  {<Badge variant="secondary">{p.directPublish ? "Direct publish" : "Finish in TikTok"}</Badge>}
                 </div>
               </CardHeader>
               <CardContent className="space-y-4 flex-1">
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <div className="text-muted-foreground text-xs">Max duration</div>
+                    <div className="text-muted-foreground text-xs">ShortWork duration profile</div>
                     <div>{p.maxDurationSec}s</div>
                   </div>
                   <div>
@@ -48,7 +48,7 @@ const Platforms = () => {
                     <div>{p.aspectRatio}</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground text-xs">Max size</div>
+                    <div className="text-muted-foreground text-xs">ShortWork upload limit</div>
                     <div>{p.maxSizeMB >= 1024 ? `${(p.maxSizeMB/1024).toFixed(1)}GB` : `${p.maxSizeMB}MB`}</div>
                   </div>
                   <div>
