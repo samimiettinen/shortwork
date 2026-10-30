@@ -1,3 +1,4 @@
+import { Facebook, Instagram, Youtube } from "@/components/social/BrandIcons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,16 +13,7 @@ import {
   type ConnectionUiStatus,
 } from "@/lib/social/connection-status";
 import { PLATFORM_CONFIG, type ProviderName } from "@/lib/social/types";
-import {
-  Check,
-  Facebook,
-  Instagram,
-  Link2,
-  Loader2,
-  ShieldCheck,
-  Video,
-  Youtube,
-} from "lucide-react";
+import { Check, Link2, Loader2, ShieldCheck, Video } from "lucide-react";
 
 export interface SocialConnectAccount {
   id: string;

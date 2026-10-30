@@ -1,3 +1,4 @@
+import { Instagram, Facebook, Linkedin, Twitter, Youtube } from "@/components/social/BrandIcons";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -10,7 +11,7 @@ import { FacebookAnalytics } from "@/components/analytics/FacebookAnalytics";
 import { LinkedInAnalytics } from "@/components/analytics/LinkedInAnalytics";
 import { XAnalytics } from "@/components/analytics/XAnalytics";
 import { YouTubeAnalytics } from "@/components/analytics/YouTubeAnalytics";
-import { MessageCircle, BarChart3, Instagram, Facebook, Linkedin, Twitter, Youtube, LayoutGrid } from "lucide-react";
+import { MessageCircle, BarChart3, LayoutGrid } from "lucide-react";
 
 const Analytics = () => {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);

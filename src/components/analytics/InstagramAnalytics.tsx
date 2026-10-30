@@ -1,3 +1,4 @@
+import { Instagram } from "@/components/social/BrandIcons";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -7,10 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { exportToCSV } from "@/lib/csv-export";
-import { 
-  Eye, Heart, MessageCircle, Users, UserPlus, Image,
-  RefreshCw, TrendingUp, ExternalLink, AlertCircle, Loader2, Instagram, Download
-} from "lucide-react";
+import { Eye, Heart, MessageCircle, Users, UserPlus, Image, RefreshCw, TrendingUp, ExternalLink, AlertCircle, Loader2, Download } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 interface InstagramAccount {

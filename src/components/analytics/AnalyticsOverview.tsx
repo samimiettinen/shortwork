@@ -1,3 +1,4 @@
+import { Instagram, Facebook, Linkedin, Twitter, Youtube } from "@/components/social/BrandIcons";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,11 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { exportToCSV } from "@/lib/csv-export";
-import { 
-  Users, Eye, Heart, MessageCircle, TrendingUp,
-  Instagram, Facebook, Linkedin, Twitter, Youtube, MessageCircle as ThreadsIcon,
-  RefreshCw, Loader2, ArrowUpRight, AlertCircle, Download
-} from "lucide-react";
+import { Users, Eye, Heart, MessageCircle, TrendingUp, MessageCircle as ThreadsIcon, RefreshCw, Loader2, ArrowUpRight, AlertCircle, Download } from "lucide-react";
 interface PlatformSummary {
   platform: string;
   connected: boolean;

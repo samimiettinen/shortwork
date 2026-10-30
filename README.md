@@ -66,7 +66,7 @@ npm run test:e2e         # mocked Supabase; includes a tiny generated video fixt
 npm run build
 ```
 
-`npm run lint` also inspects legacy parts of the app and currently reports existing errors outside the publishing work. CI keeps frontend installation, publishing checks, edge tests and SQL assertions visible as separate jobs. The database test fixture checks the publishing migrations against the original schema; it is not a full Supabase deployment test.
+`npm run lint` also inspects legacy parts of the app. The merged TypeScript 7 update currently blocks the installed ESLint parser before either lint command can run; the earlier dependency baseline also had legacy lint debt. CI keeps frontend installation, publishing checks, edge tests and SQL assertions visible as separate jobs. The database test fixture checks the publishing migrations against the original schema; it is not a full Supabase deployment test.
 
 ## Project structure
 
