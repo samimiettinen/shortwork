@@ -17,7 +17,7 @@ async function mocked(steps: Step[], run: () => Promise<void>, tick = 1000) {
     ok(String(input).includes(step[0]), `Expected ${step[0]}, got ${input}`);
     return typeof step[1] === 'function' ? step[1](init) : step[1];
   };
-  globalThis.setTimeout = ((fn: Parameters<typeof setTimeout>[0], _ms?: number, ...args: unknown[]) => original.timeout(fn, 0, ...args)) as typeof setTimeout;
+  globalThis.setTimeout = ((fn: () => void) => original.timeout(fn, 0)) as typeof setTimeout;
   Date.now = () => { time += tick; return time; };
   try { await run(); equal(steps.length, 0, 'All expected requests must be consumed'); }
   finally { globalThis.fetch = original.fetch; globalThis.setTimeout = original.timeout; Date.now = original.now; }

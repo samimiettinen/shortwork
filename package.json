@@ -10,9 +10,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "test": "deno test --allow-env supabase/functions/_shared/*_test.ts",
+    "test": "deno test --config supabase/functions/deno.json --allow-env supabase/functions/_shared/*_test.ts",
     "test:e2e": "playwright test",
-    "check:edge": "deno check supabase/functions/social-publish/index.ts supabase/functions/publish-scheduled/index.ts",
+    "check:edge": "deno check --config supabase/functions/deno.json supabase/functions/social-publish/index.ts supabase/functions/publish-scheduled/index.ts",
     "lint:publishing": "eslint src/components/social/SocialPublisher.tsx src/lib/social/media.ts src/lib/social/publish.ts src/pages/Queue.tsx supabase/functions/_shared/publishing-contract.ts supabase/functions/_shared/media.ts supabase/functions/_shared/publish-service.ts supabase/functions/_shared/publishers.ts supabase/functions/social-publish/index.ts supabase/functions/publish-scheduled/index.ts"
   },
   "dependencies": {
