@@ -1,0 +1,21 @@
+{
+  "version": "5",
+  "redirects": {
+    "https://esm.sh/@supabase/supabase-js@2": "https://esm.sh/@supabase/supabase-js@2.118.0",
+    "https://esm.sh/iceberg-js@^0.8.1?target=denonext": "https://esm.sh/iceberg-js@0.8.1?target=denonext"
+  },
+  "remote": {
+    "https://esm.sh/@supabase/auth-js@2.118.0/denonext/auth-js.mjs": "5121b1d9b48a963597ba35696949ac4f499b51c93c8e77a9d1dd72200c67bdba",
+    "https://esm.sh/@supabase/functions-js@2.118.0/denonext/functions-js.mjs": "8e1f48c1acbe4fb7a25e04f3c1107d5dfc5e94b0ca1c18ea580dbe9817462955",
+    "https://esm.sh/@supabase/phoenix@0.4.5/denonext/phoenix.mjs": "40bd2a70829cd847848baac58e635bacd83fd62188f6624b44e2c295341004eb",
+    "https://esm.sh/@supabase/postgrest-js@2.118.0/denonext/postgrest-js.mjs": "656d1371e530af4df6c8685ab50db8c7ebcd2a2df8fcc8eae113a16e3524ce69",
+    "https://esm.sh/@supabase/realtime-js@2.118.0/denonext/realtime-js.mjs": "cddca67aec4a5137ebbd0b6f75a1cd30d26ac188b44dbd8d51b3eaeb4a41d8b8",
+    "https://esm.sh/@supabase/storage-js@2.118.0/denonext/storage-js.mjs": "9e88d80aeb7525989928fb5b3fa783b7d1d9ccab94705b6395895197a220c4fc",
+    "https://esm.sh/@supabase/supabase-js@2.118.0": "56fce2ec273698af8a739c03a005c4b2160e163e5d2c0ede05de7e9bd47e28b8",
+    "https://esm.sh/@supabase/supabase-js@2.118.0/denonext/dist/tracingRegistry.mjs": "7609128cf6bbde95ee8d4ca1854bbb4fdad00f879f26dcf22ff22b19988f0095",
+    "https://esm.sh/@supabase/supabase-js@2.118.0/denonext/supabase-js.mjs": "483959ac25f11373904382fdbd28f44fcc659eb3a542a4e7982b6c4c6f9bc97c",
+    "https://esm.sh/iceberg-js@0.8.1/denonext/iceberg-js.mjs": "d839d81a2e3966500ca2cdd0c1cb458e9608bacfc91f7bb67a69b2e878dcdb4f",
+    "https://esm.sh/iceberg-js@0.8.1?target=denonext": "58c849d7fe2bf4eca4a84eb501e83c161a7d8c34ca1bec15a962b3bec3062633",
+    "https://esm.sh/tslib@2.8.1/denonext/tslib.mjs": "c38da5dd6da6281964435002ce204cd586634fe3bdfb24a0ee116f48cf3292e9"
+  }
+}

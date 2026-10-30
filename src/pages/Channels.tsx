@@ -1,3 +1,4 @@
+import { Instagram, Facebook, Linkedin, Twitter, Youtube } from "@/components/social/BrandIcons";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -12,10 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { useErrorHandler } from "@/hooks/use-error-handler";
-import { 
-  Plus, RefreshCw, Trash2, Check, AlertCircle, ExternalLink, 
-  Loader2, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud, Youtube, HelpCircle, Zap, AlertTriangle, XCircle, RotateCcw, Copy
-} from "lucide-react";
+import { Plus, RefreshCw, Trash2, Check, AlertCircle, ExternalLink, Loader2, Video, MessageCircle, Cloud, HelpCircle, Zap, AlertTriangle, XCircle, RotateCcw, Copy } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 import { ChannelSetupWizard } from "@/components/channels/ChannelSetupWizard";
 import { ConnectionTroubleshooting } from "@/components/channels/ConnectionTroubleshooting";
@@ -499,7 +497,7 @@ const Channels = () => {
                     )}
 
                     <div className="text-xs text-muted-foreground mb-4">
-                      {account.autopublish_capable ? (
+                      {account.platform === 'tiktok' ? <span>TikTok inbox upload · finish publishing in TikTok</span> : account.autopublish_capable ? (
                         <span className="flex items-center gap-1"><Check className="w-3 h-3 text-success" /> Auto-publish supported</span>
                       ) : (
                         <span className="flex items-center gap-1"><AlertCircle className="w-3 h-3 text-warning" /> Manual publish only</span>

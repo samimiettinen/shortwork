@@ -13,7 +13,7 @@ async function getKey(): Promise<CryptoKey | null> {
   const raw = Deno.env.get("TOKEN_ENCRYPTION_KEY");
   if (!raw) return null;
   // Accept hex (64 chars = 32 bytes) or any string ≥ 32 chars.
-  let keyBytes: Uint8Array;
+  let keyBytes: Uint8Array<ArrayBuffer>;
   if (/^[0-9a-f]{64}$/i.test(raw)) {
     keyBytes = new Uint8Array(
       raw.match(/.{2}/g)!.map((h) => parseInt(h, 16)),

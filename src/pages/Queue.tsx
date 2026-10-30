@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -15,6 +15,7 @@ interface PostTarget {
   platform: string;
   status: string;
   remote_post_id: string | null;
+  remote_post_url: string | null;
   last_error_message: string | null;
   published_at: string | null;
   social_accounts: { display_name: string; handle: string | null } | null;
@@ -29,10 +30,12 @@ interface PostRow {
   created_at: string;
   updated_at: string;
   post_targets: PostTarget[];
+  per_channel_overrides?: { platform_overrides?: Record<string, { content?: string; title?: string; scheduledAt?: string }> };
 }
 
 const statusColor: Record<string, string> = {
   scheduled: 'bg-blue-500/10 text-blue-500',
+  partial: 'bg-amber-500/10 text-amber-500',
   published: 'bg-green-500/10 text-green-500',
   failed: 'bg-red-500/10 text-red-500',
   canceled: 'bg-muted text-muted-foreground',
@@ -52,7 +55,7 @@ const Queue = () => {
   const [history, setHistory] = useState<PostRow[]>([]);
   const [view, setView] = useState("scheduled");
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -66,47 +69,43 @@ const Queue = () => {
       setWorkspaceId(membership.workspace_id);
 
       const select = `
-        id, status, title, body_text, scheduled_at, created_at, updated_at,
-        post_targets ( id, platform, status, remote_post_id, last_error_message, published_at,
+        id, status, title, body_text, scheduled_at, created_at, updated_at, per_channel_overrides,
+        post_targets ( id, platform, status, remote_post_id, remote_post_url, last_error_message, published_at,
           social_accounts ( display_name, handle )
         )
       `;
-      const { data: sch } = await supabase
+      const { data: sch, error: scheduledError } = await supabase
         .from('posts')
         .select(select)
         .eq('workspace_id', membership.workspace_id)
-        .eq('status', 'scheduled')
+        .in('status', ['scheduled', 'publishing'])
         .order('scheduled_at', { ascending: true });
-      setScheduled((sch as any) || []);
+      if (scheduledError) throw scheduledError;
+      setScheduled((sch as unknown as PostRow[]) || []);
 
-      const { data: hist } = await supabase
+      const { data: hist, error: historyError } = await supabase
         .from('posts')
         .select(select)
         .eq('workspace_id', membership.workspace_id)
-        .in('status', ['published', 'failed', 'canceled'])
+        .in('status', ['published', 'partial', 'needs_user_action', 'failed', 'canceled'])
         .order('updated_at', { ascending: false })
         .limit(50);
-      setHistory((hist as any) || []);
+      if (historyError) throw historyError;
+      setHistory((hist as unknown as PostRow[]) || []);
     } catch (err) {
       handleError(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate, handleError]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void load(); }, [load]);
 
   const cancel = async (postId: string) => {
     if (!confirm('Cancel this scheduled post?')) return;
     try {
-      // Mark post canceled, targets skipped, delete queued jobs
-      const { data: targets } = await supabase.from('post_targets').select('id').eq('post_id', postId);
-      const targetIds = (targets || []).map((t: any) => t.id);
-      if (targetIds.length) {
-        await supabase.from('publish_jobs').delete().in('post_target_id', targetIds).in('status', ['queued', 'retry_scheduled']);
-        await supabase.from('post_targets').update({ status: 'skipped' as const }).in('id', targetIds).eq('status', 'queued');
-      }
-      await supabase.from('posts').update({ status: 'canceled' as const }).eq('id', postId);
+      const { error } = await supabase.rpc('cancel_publish_request', { p_post: postId });
+      if (error) throw error;
       toast({ title: 'Canceled' });
       load();
     } catch (err) {
@@ -120,7 +119,7 @@ const Queue = () => {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge className={statusColor[p.status] || ''}>{p.status}</Badge>
+              <Badge className={statusColor[p.status] || ''}>{p.status.replaceAll('_', ' ')}</Badge>
               {p.scheduled_at && (
                 <span className="text-xs text-muted-foreground">
                   <Clock className="w-3 h-3 inline mr-1" />
@@ -130,8 +129,8 @@ const Queue = () => {
             </div>
             <p className="text-sm mt-2 whitespace-pre-wrap line-clamp-3">{p.body_text || p.title}</p>
           </div>
-          {canCancel && (
-            <Button variant="ghost" size="sm" onClick={() => cancel(p.id)}>
+          {canCancel && p.status === 'scheduled' && p.post_targets.every(t => t.status === 'queued') && (
+            <Button variant="ghost" size="sm" onClick={() => cancel(p.id)} aria-label="Cancel scheduled post">
               <Trash2 className="w-4 h-4" />
             </Button>
           )}
@@ -143,15 +142,21 @@ const Queue = () => {
               {t.status === 'failed' && <XCircle className="w-3.5 h-3.5 text-red-500" />}
               {t.status === 'publishing' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               {(t.status === 'queued' || t.status === 'needs_user_action' || t.status === 'skipped') && (
-                <Badge variant="outline" className="text-[10px] capitalize h-4">{t.status.replace('_',' ')}</Badge>
+                <Badge variant="outline" className="text-[10px] capitalize h-4">{t.status.replaceAll('_',' ')}</Badge>
               )}
               <span className="capitalize">{t.platform}</span>
               {t.social_accounts?.display_name && <span className="text-muted-foreground">· {t.social_accounts.display_name}</span>}
-              {t.remote_post_id && t.status === 'published' && (
-                <a href="#" className="text-primary inline-flex items-center" title={t.remote_post_id}>
+              {t.remote_post_url && /^https:\/\//.test(t.remote_post_url) && t.status === 'published' && (
+                <a href={t.remote_post_url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center" title="Open published post">
                   <ExternalLink className="w-3 h-3" />
                 </a>
               )}
+              {p.per_channel_overrides?.platform_overrides?.[t.platform]?.scheduledAt && <span className="text-muted-foreground">
+                · {new Date(p.per_channel_overrides.platform_overrides[t.platform].scheduledAt!).toLocaleString()}
+              </span>}
+              {t.platform === 'tiktok' && t.status === 'needs_user_action' && <Button variant="outline" size="sm" onClick={() =>
+                navigator.clipboard.writeText(p.per_channel_overrides?.platform_overrides?.tiktok?.content || p.body_text || '')
+                  .then(() => toast({ title: 'TikTok caption copied' })).catch(handleError)}>Copy TikTok caption</Button>}
               {t.last_error_message && <span className="text-red-500 truncate max-w-[240px]" title={t.last_error_message}>— {t.last_error_message}</span>}
             </div>
           ))}
@@ -166,7 +171,7 @@ const Queue = () => {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-display font-bold">Queue</h1>
-            <p className="text-muted-foreground mt-1">Manage your scheduled posts</p>
+            <p className="text-muted-foreground mt-1">Track every channel’s outcome and scheduled posts</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={load}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
@@ -178,7 +183,7 @@ const Queue = () => {
 
         <Tabs value={view} onValueChange={setView}>
           <TabsList className="mb-6">
-            <TabsTrigger value="scheduled">Scheduled ({scheduled.length})</TabsTrigger>
+            <TabsTrigger value="scheduled">Active ({scheduled.length})</TabsTrigger>
             <TabsTrigger value="history">History ({history.length})</TabsTrigger>
           </TabsList>
 

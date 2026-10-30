@@ -44,7 +44,13 @@ REVOKE EXECUTE ON FUNCTION public.is_workspace_admin_or_owner(uuid) FROM PUBLIC,
 REVOKE EXECUTE ON FUNCTION public.is_app_admin(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.get_user_workspace_ids() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.has_workspace_role(uuid, app_role) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.trigger_publish_scheduled() FROM PUBLIC, anon, authenticated;
+-- This optional hook was created in the dashboard on some deployments.
+DO $$ BEGIN
+  IF to_regprocedure('public.trigger_publish_scheduled()') IS NOT NULL THEN
+    REVOKE EXECUTE ON FUNCTION public.trigger_publish_scheduled() FROM PUBLIC, anon, authenticated;
+    GRANT EXECUTE ON FUNCTION public.trigger_publish_scheduled() TO service_role;
+  END IF;
+END $$;
 REVOKE EXECUTE ON FUNCTION public.update_updated_at_column() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
 
@@ -53,7 +59,6 @@ GRANT EXECUTE ON FUNCTION public.is_workspace_admin_or_owner(uuid) TO service_ro
 GRANT EXECUTE ON FUNCTION public.is_app_admin(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_user_workspace_ids() TO service_role;
 GRANT EXECUTE ON FUNCTION public.has_workspace_role(uuid, app_role) TO service_role;
-GRANT EXECUTE ON FUNCTION public.trigger_publish_scheduled() TO service_role;
 
 GRANT EXECUTE ON FUNCTION public.accept_workspace_invitation(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.create_workspace_with_owner(text, text) TO authenticated, service_role;

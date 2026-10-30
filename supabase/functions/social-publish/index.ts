@@ -1,560 +1,92 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getCorsHeaders } from "../_shared/cors.ts";
-import {
-  publishToProvider,
-  fetchMediaBlob,
-  PublishOptions,
-  MediaMeta,
-  decryptToken,
-} from "../_shared/publishers.ts";
-
-// If a mediaUrl points at our private "social-media" storage bucket, replace
-// it with a fresh short-lived signed URL so external platforms (Meta, IG,
-// Threads) can fetch the file. Accepts either legacy public URLs or already
-// signed URLs from the client (they get re-signed for a fresh TTL).
-async function maybeSignInternalMediaUrl(
-  supabase: any,
-  supabaseUrl: string,
-  mediaUrl: string,
-): Promise<string | null> {
-  try {
-    const projectHost = new URL(supabaseUrl).host;
-    const parsed = new URL(mediaUrl);
-    if (parsed.host !== projectHost) return null;
-    const match = parsed.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/social-media\/(.+)$/);
-    if (!match) return null;
-    const path = decodeURIComponent(match[1]);
-    if (!path) return null;
-    const { data, error } = await supabase
-      .storage
-      .from('social-media')
-      .createSignedUrl(path, 60 * 60); // 1 hour
-    if (error || !data?.signedUrl) {
-      console.error('createSignedUrl failed', error);
-      return null;
-    }
-    return data.signedUrl;
-  } catch (e) {
-    console.error('maybeSignInternalMediaUrl error', e);
-    return null;
-  }
-}
-
-interface PublishRequest {
-  workspaceId: string;
-  content: string;
-  linkUrl?: string;
-  mediaUrl?: string;
-  mediaType?: 'image' | 'video';
-  mediaMeta?: MediaMeta;
-  targetAccountIds: string[];
-}
-
-interface PublishResult {
-  accountId: string;
-  platform: string;
-  success: boolean;
-  postId?: string;
-  postUrl?: string;
-  error?: string;
-  needsReconnect?: boolean;
-}
-
-// UUID validation regex
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-// Platform character limits
-const PLATFORM_LIMITS: Record<string, number> = {
-  x: 280,
-  bluesky: 300,
-  threads: 500,
-  instagram: 2200,
-  linkedin: 3000,
-  facebook: 63206,
-  youtube: 5000,
-  tiktok: 2200,
-};
-
-// Platforms that need the media bytes server-side (vs a public URL)
-const NEEDS_MEDIA_BYTES = new Set(['youtube', 'tiktok', 'x', 'linkedin', 'bluesky']);
-
-// Validate and sanitize URL
-function validateUrl(url: string | undefined): { valid: boolean; sanitized?: string; error?: string } {
-  if (!url || url.trim() === '') {
-    return { valid: true, sanitized: undefined };
-  }
-
-  try {
-    const parsed = new URL(url);
-
-    // Only allow http/https protocols
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
-      return { valid: false, error: 'Only HTTP/HTTPS URLs are allowed' };
-    }
-
-    // Block localhost and internal IPs
-    const hostname = parsed.hostname.toLowerCase();
-    if (
-      hostname === 'localhost' ||
-      hostname.startsWith('127.') ||
-      hostname.startsWith('192.168.') ||
-      hostname.startsWith('10.') ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
-      hostname.startsWith('169.254.') ||
-      hostname === '0.0.0.0' ||
-      hostname === '[::1]' || hostname === '::1' ||
-      hostname === '[::]' || hostname === '::' ||
-      /^\[?(f[cd][0-9a-f]{2}:|fe80:)/i.test(hostname) ||
-      hostname.endsWith('.internal') ||
-      hostname.endsWith('.local')
-    ) {
-      return { valid: false, error: 'Internal URLs are not allowed' };
-    }
-
-    return { valid: true, sanitized: parsed.toString() };
-  } catch {
-    return { valid: false, error: 'Invalid URL format' };
-  }
-}
-
-// Validate request body
-function validatePublishRequest(body: unknown): {
-  valid: boolean;
-  data?: PublishRequest;
-  error?: string
-} {
-  if (!body || typeof body !== 'object') {
-    return { valid: false, error: 'Invalid request body' };
-  }
-
-  const request = body as Record<string, unknown>;
-
-  // Validate workspaceId
-  if (!request.workspaceId || typeof request.workspaceId !== 'string') {
-    return { valid: false, error: 'workspaceId is required' };
-  }
-  if (!UUID_REGEX.test(request.workspaceId)) {
-    return { valid: false, error: 'Invalid workspaceId format' };
-  }
-
-  // Validate content
-  if (!request.content || typeof request.content !== 'string') {
-    return { valid: false, error: 'content is required' };
-  }
-  const content = request.content.trim();
-  if (content.length === 0) {
-    return { valid: false, error: 'content cannot be empty' };
-  }
-  if (content.length > 10000) {
-    return { valid: false, error: 'content exceeds maximum length of 10000 characters' };
-  }
-
-  // Validate targetAccountIds
-  if (!Array.isArray(request.targetAccountIds) || request.targetAccountIds.length === 0) {
-    return { valid: false, error: 'At least one target account is required' };
-  }
-  if (request.targetAccountIds.length > 20) {
-    return { valid: false, error: 'Maximum 20 target accounts allowed' };
-  }
-  for (const id of request.targetAccountIds) {
-    if (typeof id !== 'string' || !UUID_REGEX.test(id)) {
-      return { valid: false, error: 'Invalid account ID format' };
-    }
-  }
-
-  // Validate linkUrl (optional)
-  const linkValidation = validateUrl(request.linkUrl as string | undefined);
-  if (!linkValidation.valid) {
-    return { valid: false, error: `linkUrl: ${linkValidation.error}` };
-  }
-
-  // Validate mediaUrl (optional)
-  const mediaValidation = validateUrl(request.mediaUrl as string | undefined);
-  if (!mediaValidation.valid) {
-    return { valid: false, error: `mediaUrl: ${mediaValidation.error}` };
-  }
-
-  // Validate mediaType (optional)
-  if (request.mediaType !== undefined &&
-      request.mediaType !== 'image' &&
-      request.mediaType !== 'video') {
-    return { valid: false, error: 'mediaType must be "image" or "video"' };
-  }
-
-  // Validate mediaMeta (optional)
-  let mediaMeta: MediaMeta | undefined;
-  if (request.mediaMeta && typeof request.mediaMeta === 'object') {
-    const meta = request.mediaMeta as Record<string, unknown>;
-    mediaMeta = {
-      width: typeof meta.width === 'number' ? meta.width : undefined,
-      height: typeof meta.height === 'number' ? meta.height : undefined,
-      durationSeconds: typeof meta.durationSeconds === 'number' ? meta.durationSeconds : undefined,
-    };
-  }
-
-  return {
-    valid: true,
-    data: {
-      workspaceId: request.workspaceId,
-      content,
-      linkUrl: linkValidation.sanitized,
-      mediaUrl: mediaValidation.sanitized,
-      mediaType: request.mediaType as 'image' | 'video' | undefined,
-      mediaMeta,
-      targetAccountIds: request.targetAccountIds as string[],
-    },
-  };
-}
-
-// Validate content for specific platform
-function validateContentForPlatform(
-  platform: string,
-  content: string,
-  hasMedia: boolean,
-  mediaType?: string
-): { valid: boolean; error?: string } {
-  const maxLength = PLATFORM_LIMITS[platform] || 2200;
-
-  if (content.length > maxLength) {
-    return {
-      valid: false,
-      error: `Content exceeds ${platform} limit of ${maxLength} characters`,
-    };
-  }
-
-  // Instagram requires media
-  if (platform === 'instagram' && !hasMedia) {
-    return {
-      valid: false,
-      error: 'Instagram requires an image or video',
-    };
-  }
-
-  // YouTube and TikTok require video
-  if (platform === 'youtube' || platform === 'tiktok') {
-    if (!hasMedia || mediaType !== 'video') {
-      return {
-        valid: false,
-        error: `${platform === 'youtube' ? 'YouTube' : 'TikTok'} requires a video file`,
-      };
-    }
-  }
-
-  return { valid: true };
-}
-
-// Validate workspace access
-async function validateWorkspaceAccess(
-  supabase: any,
-  authHeader: string,
-  workspaceId: string,
-  requiredRoles: string[] = ['owner', 'admin', 'editor']
-): Promise<{ authorized: boolean; userId?: string; error?: string }> {
-  // Extract and validate JWT
-  const token = authHeader.replace('Bearer ', '');
-  const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-
-  if (userError || !user) {
-    console.error('Auth validation error:', userError);
-    return { authorized: false, error: 'Invalid authentication token' };
-  }
-
-  // Check workspace membership
-  const { data: membership, error: memberError } = await supabase
-    .from('workspace_members')
-    .select('role')
-    .eq('workspace_id', workspaceId)
-    .eq('user_id', user.id)
-    .single();
-
-  if (memberError || !membership) {
-    console.log('Workspace access denied:', { userId: user.id, workspaceId, error: memberError });
-    return { authorized: false, error: 'Not a member of this workspace' };
-  }
-
-  // Validate role
-  const role = membership.role as string;
-  if (!requiredRoles.includes(role)) {
-    return {
-      authorized: false,
-      error: `Insufficient permissions. Requires: ${requiredRoles.join(', ')}`,
-    };
-  }
-
-  return { authorized: true, userId: user.id };
-}
-
-// Record the publish in posts/post_targets so the Queue page has history
-async function recordPublishHistory(
-  supabase: any,
-  workspaceId: string,
-  userId: string,
-  request: PublishRequest,
-  results: PublishResult[],
-  accounts: any[]
-) {
-  try {
-    const successCount = results.filter(r => r.success).length;
-    const { data: post } = await supabase
-      .from('posts')
-      .insert({
-        workspace_id: workspaceId,
-        created_by: userId,
-        status: successCount > 0 ? 'published' : 'failed',
-        title: request.content.split('\n')[0].substring(0, 120),
-        body_text: request.content,
-        link_url: request.linkUrl,
-        per_channel_overrides: request.mediaUrl
-          ? { media_url: request.mediaUrl, media_type: request.mediaType }
-          : {},
-      })
-      .select()
-      .single();
-
-    if (!post) return;
-
-    const targets = results.map(r => {
-      const account = accounts.find(a => a.id === r.accountId);
-      return {
-        post_id: post.id,
-        social_account_id: r.accountId,
-        platform: account?.platform || r.platform,
-        status: r.success ? 'published' : 'failed',
-        remote_post_id: r.postId,
-        publish_attempts: 1,
-        last_error_message: r.error,
-        last_attempt_at: new Date().toISOString(),
-        published_at: r.success ? new Date().toISOString() : null,
-      };
-    });
-    await supabase.from('post_targets').insert(targets);
-  } catch (error) {
-    console.error('Failed to record publish history:', error);
-  }
-}
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { getCorsHeaders } from '../_shared/cors.ts';
+import { parsePublishPayload, platformVariant, summarizeStatuses, validateForPlatform, type PublishPayload } from '../_shared/publishing-contract.ts';
+import { workspaceMediaPath } from '../_shared/media.ts';
+import { prepareMedia, deliver, saveResult, rollup, type Account, type AccountResult } from '../_shared/publish-service.ts';
 
 Deno.serve(async (req) => {
-  const corsHeaders = getCorsHeaders(req.headers.get('Origin'));
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const headers = { ...getCorsHeaders(req.headers.get('Origin')), 'Content-Type': 'application/json' };
+  const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers });
+  if (req.method === 'OPTIONS') return new Response(null, { headers });
+  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  const client = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  const auth = req.headers.get('Authorization');
+  if (!auth?.startsWith('Bearer ')) return json({ error: 'Unauthorized' }, 401);
+  const { data: { user }, error: authError } = await client.auth.getUser(auth.slice(7));
+  if (authError || !user) return json({ error: 'Unauthorized' }, 401);
 
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+  let payload: PublishPayload;
+  try {
+    payload = parsePublishPayload(await req.json());
+    payload.mediaPath = workspaceMediaPath(payload.workspaceId, Deno.env.get('SUPABASE_URL')!, payload.mediaPath, payload.mediaUrl);
+    payload.mediaUrl = undefined;
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : 'Invalid request' }, 400);
+  }
+  const { data: membership, error: memberError } = await client.from('workspace_members')
+    .select('role').eq('workspace_id', payload.workspaceId).eq('user_id', user.id).maybeSingle();
+  if (memberError || !membership || !['owner', 'admin', 'editor'].includes(membership.role)) {
+    return json({ error: 'Publishing permission required in this workspace' }, 403);
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const { data, error } = await client.from('social_accounts')
+      .select('id, workspace_id, platform, platform_user_id, status, oauth_tokens(access_token, refresh_token, expires_at)')
+      .eq('workspace_id', payload.workspaceId).eq('status', 'connected').in('id', payload.targetAccountIds);
+    if (error) throw error;
+    const accounts = data as unknown as Account[];
+    if (accounts.length !== payload.targetAccountIds.length) {
+      return json({ error: 'Every selected channel must be connected to this workspace' }, 400);
+    }
+    const errors = accounts.flatMap(a => validateForPlatform(a.platform, { ...platformVariant(payload, a.platform), hasMedia: !!payload.mediaPath }));
+    if (errors.length) return json({ error: [...new Set(errors)].join('. ') }, 400);
 
-    // Verify authorization header
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    // Replays return stored outcomes before touching storage or provider APIs.
+    const existing = await client.from('posts').select('id').eq('workspace_id', payload.workspaceId)
+      .eq('created_by', user.id).eq('client_request_id', payload.requestId).maybeSingle();
+    if (existing.error) throw existing.error;
+    let postId = existing.data?.id as string | undefined;
+    let created = false;
+    let media: Awaited<ReturnType<typeof prepareMedia>> | undefined;
+    if (!postId) {
+      try { media = await prepareMedia(client, payload); }
+      catch (error) { return json({ error: error instanceof Error ? error.message : 'Invalid media' }, 400); }
+      const { data: creation, error: createError } = await client.rpc('create_publish_request', {
+        p_actor: user.id, p_workspace: payload.workspaceId, p_request: payload.requestId,
+        p_content: payload.content, p_accounts: payload.targetAccountIds, p_link: payload.linkUrl || null,
+        p_media: { media_path: media.path, media_type: payload.mediaType, media_meta: payload.mediaMeta,
+          youtube_visibility: payload.youtubeVisibility, vertical_short: payload.verticalShort, video_title: payload.videoTitle,
+          platform_overrides: payload.platformOverrides, youtube_made_for_kids: payload.youtubeMadeForKids, instagram_share_to_feed: payload.instagramShareToFeed }, p_scheduled_at: payload.scheduledAt || null,
       });
+      if (createError || !creation?.post_id) throw createError || new Error('Could not create publish request');
+      postId = creation.post_id;
+      created = creation.created;
     }
-
-    // Parse and validate request body
-    let rawBody: unknown;
-    try {
-      rawBody = await req.json();
-    } catch {
-      return new Response(JSON.stringify({ error: 'Invalid JSON in request body' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    if (created && !payload.scheduledAt) {
+      // Every completed target is saved independently, even if another provider fails.
+      await Promise.all(accounts.map(async account => {
+        const result = await deliver(client, account, payload, media!);
+        await saveResult(client, postId!, result);
+      }));
+      await rollup(client, postId!);
     }
-
-    const validation = validatePublishRequest(rawBody);
-    if (!validation.valid || !validation.data) {
-      return new Response(JSON.stringify({ error: validation.error }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    const { workspaceId, content, linkUrl, mediaUrl, mediaType, mediaMeta, targetAccountIds } = validation.data;
-
-    // Validate workspace access and permissions
-    const authResult = await validateWorkspaceAccess(
-      supabase,
-      authHeader,
-      workspaceId,
-      ['owner', 'admin', 'editor']
-    );
-
-    if (!authResult.authorized) {
-      return new Response(JSON.stringify({ error: authResult.error }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    console.log('Publishing content:', {
-      userId: authResult.userId,
-      workspaceId,
-      accountCount: targetAccountIds.length
-    });
-
-    // Get target accounts with tokens
-    const { data: accounts, error: accountsError } = await supabase
-      .from('social_accounts')
-      .select(`
-        id,
-        platform,
-        platform_user_id,
-        display_name,
-        oauth_tokens (
-          access_token,
-          refresh_token,
-          expires_at
-        )
-      `)
-      .eq('workspace_id', workspaceId)
-      .in('id', targetAccountIds)
-      .eq('status', 'connected');
-
-    if (accountsError || !accounts?.length) {
-      console.error('Accounts query error:', accountsError);
-      return new Response(JSON.stringify({ error: 'No valid accounts found' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Media in our private "social-media" bucket needs a short-lived signed
-    // URL so external providers (Meta, Instagram, Threads) can fetch it.
-    let effectiveMediaUrl = mediaUrl;
-    if (mediaUrl) {
-      const signed = await maybeSignInternalMediaUrl(supabase, supabaseUrl, mediaUrl);
-      if (signed) effectiveMediaUrl = signed;
-    }
-
-    // Download the media once and share the bytes across all platforms that
-    // upload server-side (YouTube, TikTok, X, LinkedIn, Bluesky)
-    let mediaBlob: Blob | null = null;
-    if (effectiveMediaUrl && accounts.some(a => NEEDS_MEDIA_BYTES.has(a.platform))) {
-      try {
-        mediaBlob = await fetchMediaBlob(effectiveMediaUrl);
-      } catch (error) {
-        console.error('Media prefetch failed:', error);
-        // URL-based platforms can still work; byte-based ones will retry the fetch
-      }
-    }
-
-    // Publish to all platforms in parallel
-    const results: PublishResult[] = await Promise.all(accounts.map(async (account: any): Promise<PublishResult> => {
-      const platformValidation = validateContentForPlatform(
-        account.platform,
-        content,
-        !!mediaUrl,
-        mediaType
-      );
-
-      if (!platformValidation.valid) {
-        return {
-          accountId: account.id,
-          platform: account.platform,
-          success: false,
-          error: platformValidation.error,
-        };
-      }
-
-      const token = account.oauth_tokens?.[0];
-      if (!token?.access_token) {
-        return {
-          accountId: account.id,
-          platform: account.platform,
-          success: false,
-          error: 'No access token found',
-        };
-      }
-
-      try {
-        const options: PublishOptions = {
-          accountId: account.platform_user_id,
-          socialAccountId: account.id,
-          accessToken: await decryptToken(token.access_token),
-          refreshToken: token.refresh_token ? await decryptToken(token.refresh_token) : undefined,
-          tokenExpiresAt: token.expires_at,
-          content,
-          linkUrl,
-          mediaUrl: effectiveMediaUrl,
-          mediaType,
-          mediaMeta,
-          mediaBlob,
-        };
-        const result = await publishToProvider(account.platform, options, supabase);
-        return {
-          accountId: account.id,
-          platform: account.platform,
-          ...result,
-        };
-      } catch (error: unknown) {
-        console.error(`Publish error for ${account.platform}:`, error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return {
-          accountId: account.id,
-          platform: account.platform,
-          success: false,
-          error: errorMessage,
-        };
-      }
+    const { data: post, error: postError } = await client.from('posts')
+      .select('status, post_targets(social_account_id, platform, status, remote_post_id, remote_post_url, last_error_message)')
+      .eq('id', postId).single();
+    if (postError) throw postError;
+    const results: AccountResult[] = post.post_targets.map(t => ({
+      accountId: t.social_account_id, platform: t.platform, success: t.status === 'published',
+      postId: t.remote_post_id || undefined, postUrl: t.remote_post_url || undefined,
+      error: t.last_error_message || undefined, needsUserAction: t.status === 'needs_user_action',
     }));
-
-    // Record history so the Queue page can show past publishes
-    await recordPublishHistory(supabase, workspaceId, authResult.userId!, validation.data, results, accounts);
-
-    // Log audit entry for publish action
-    try {
-      await supabase.from('audit_logs').insert({
-        workspace_id: workspaceId,
-        actor_user_id: authResult.userId,
-        action: 'publish_content',
-        entity_type: 'social_post',
-        details: {
-          platforms: results.map(r => r.platform),
-          success_count: results.filter(r => r.success).length,
-          failure_count: results.filter(r => !r.success).length,
-          timestamp: new Date().toISOString(),
-        },
-      });
-    } catch (auditError) {
-      console.error('Audit log error:', auditError);
-      // Don't fail the request for audit log errors
-    }
-
-    // Determine overall status
-    const successCount = results.filter(r => r.success).length;
-    const status = successCount === results.length ? 'published'
-      : successCount > 0 ? 'partial'
-      : 'failed';
-
-    return new Response(JSON.stringify({
-      success: successCount > 0,
-      status,
-      results,
-      summary: {
-        total: results.length,
-        succeeded: successCount,
-        failed: results.length - successCount,
-      }
-    }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  } catch (error: unknown) {
-    console.error('Social publish error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error';
-    return new Response(JSON.stringify({ error: errorMessage }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    const status = post.status === 'scheduled' ? 'scheduled' : summarizeStatuses(post.post_targets.map(t => t.status));
+    return json({ postId, status, results, replayed: !created, summary: {
+      total: results.length, succeeded: results.filter(r => r.success).length,
+      needsAction: results.filter(r => r.needsUserAction).length,
+      failed: post.post_targets.filter(t => t.status === 'failed').length,
+    } });
+  } catch (error) {
+    console.error('Publishing request failed', error instanceof Error ? error.message : 'Database error');
+    return json({ error: 'Could not complete this request. Open Queue to check saved outcomes before retrying.' }, 500);
   }
 });

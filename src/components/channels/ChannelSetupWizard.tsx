@@ -1,13 +1,10 @@
+import { Youtube, Instagram, Facebook, Linkedin, Twitter } from "@/components/social/BrandIcons";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { 
-  ChevronRight, ChevronLeft, Check, ExternalLink, 
-  Youtube, Instagram, Facebook, Linkedin, Twitter, Video, MessageCircle, Cloud,
-  Shield, Key, UserCheck, Zap, Loader2, X
-} from "lucide-react";
+import { ChevronRight, ChevronLeft, Check, ExternalLink, Video, MessageCircle, Cloud, Shield, Key, UserCheck, Zap, Loader2, X } from "lucide-react";
 import { PLATFORM_CONFIG, ProviderName } from "@/lib/social/types";
 
 interface ChannelSetupWizardProps {

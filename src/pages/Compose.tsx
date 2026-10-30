@@ -4,9 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SocialPublisher } from "@/components/social/SocialPublisher";
-import { SchedulePost } from "@/components/social/SchedulePost";
 import { useErrorHandler } from "@/hooks/use-error-handler";
 import { Calendar, Loader2, Zap } from "lucide-react";
 
@@ -51,10 +50,10 @@ const Compose = () => {
 
   return (
     <AppLayout>
-      <div className="animate-fade-in max-w-4xl mx-auto">
+      <div className="animate-fade-in max-w-6xl mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-display font-bold">Create & Publish</h1>
-          <p className="text-muted-foreground mt-1">Create content and publish to your social channels</p>
+          <p className="text-muted-foreground mt-1">Upload one vertical video, tailor it for each network and publish or schedule it.</p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -67,13 +66,7 @@ const Compose = () => {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="publish">
-            {workspaceId && <SocialPublisher workspaceId={workspaceId} />}
-          </TabsContent>
-
-          <TabsContent value="schedule">
-            {workspaceId && <SchedulePost workspaceId={workspaceId} />}
-          </TabsContent>
+          {workspaceId && <SocialPublisher workspaceId={workspaceId} mode={activeTab === 'schedule' ? 'schedule' : 'publish'} />}
         </Tabs>
       </div>
     </AppLayout>

@@ -1,0 +1,60 @@
+name: ShortWork checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: shortwork-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint:publishing
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+  edge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.x
+      - run: deno test --config supabase/functions/deno.json --frozen --allow-env supabase/functions/_shared/*_test.ts
+      - run: deno check --config supabase/functions/deno.json --frozen supabase/functions/social-publish/index.ts supabase/functions/publish-scheduled/index.ts
+  database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: shortwork_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGPASSWORD: test-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Apply schema and publishing assertions to the isolated test database
+        run: |
+          psql -h localhost -U postgres -d shortwork_test -v ON_ERROR_STOP=1 \
+            -f tests/database/bootstrap.sql \
+            -f supabase/migrations/20251219145827_bbecdae4-86f9-48d7-acc2-02b08bf9ff79.sql \
+            -f supabase/migrations/20261030080000_publish_outcomes.sql \
+            -f supabase/migrations/20261030080100_atomic_publishing.sql \
+            -f tests/database/assertions.sql
